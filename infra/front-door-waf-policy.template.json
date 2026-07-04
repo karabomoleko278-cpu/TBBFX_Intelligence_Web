@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "wafPolicyName": {
+      "type": "string",
+      "defaultValue": "tbbfx-waf-policy"
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "Global"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/frontDoorWebApplicationFirewallPolicies",
+      "apiVersion": "2022-05-01",
+      "name": "[parameters('wafPolicyName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Premium_AzureFrontDoor"
+      },
+      "properties": {
+        "policySettings": {
+          "enabledState": "Enabled",
+          "mode": "Prevention",
+          "requestBodyCheck": "Enabled"
+        },
+        "managedRules": {
+          "managedRuleSets": [
+            {
+              "ruleSetType": "Microsoft_DefaultRuleSet",
+              "ruleSetVersion": "2.1"
+            },
+            {
+              "ruleSetType": "Microsoft_BotManagerRuleSet",
+              "ruleSetVersion": "1.0"
+            }
+          ]
+        },
+        "customRules": {
+          "rules": [
+            {
+              "name": "RateLimitPublicTerminal",
+              "enabledState": "Enabled",
+              "priority": 100,
+              "ruleType": "RateLimitRule",
+              "rateLimitDurationInMinutes": 1,
+              "rateLimitThreshold": 120,
+              "matchConditions": [
+                {
+                  "matchVariable": "RemoteAddr",
+                  "operator": "IPMatch",
+                  "negateCondition": false,
+                  "matchValue": [
+                    "0.0.0.0/0"
+                  ]
+                }
+              ],
+              "action": "Block"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

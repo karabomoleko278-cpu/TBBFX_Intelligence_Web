@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /features/
+Disallow: /hub/
+
+Sitemap: https://YOUR_PUBLIC_TBBFX_DOMAIN/sitemap.xml

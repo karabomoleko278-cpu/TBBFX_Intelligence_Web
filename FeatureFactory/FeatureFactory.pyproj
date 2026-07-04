@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>42bf6c80-5382-4c50-81d9-91028a25cc58</ProjectGuid>
+    <ProjectHome>.</ProjectHome>
+    <StartupFile>run_server.py</StartupFile>
+    <SearchPath>.</SearchPath>
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <Name>FeatureFactory</Name>
+    <RootNamespace>FeatureFactory</RootNamespace>
+    <LaunchProvider>Standard Python launcher</LaunchProvider>
+    <IsWindowsApplication>False</IsWindowsApplication>
+    <InterpreterId></InterpreterId>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' " />
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' " />
+  <PropertyGroup>
+    <VisualStudioVersion Condition=" '$(VisualStudioVersion)' == '' ">10.0</VisualStudioVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="run_server.py" />
+    <Compile Include="main.py" />
+    <Compile Include="core\config.py" />
+    <Compile Include="core\math_greeks.py" />
+    <Compile Include="core\ml_optimizer.py" />
+    <Compile Include="core\options_exposure_engine.py" />
+    <Compile Include="core\state_db.py" />
+    <Compile Include="core\stream_processor.py" />
+    <Compile Include="core\feature_pipeline.py" />
+    <Compile Include="core\governance_agent.py" />
+    <Compile Include="google_antigravity\__init__.py" />
+    <Compile Include="google_antigravity\sdk\__init__.py" />
+    <Compile Include="google_antigravity\sdk\models.py" />
+    <Compile Include="tests\test_math_greeks.py" />
+    <Compile Include="tests\test_engine_db.py" />
+    <Compile Include="tests\verify_agent_flow.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="core\" />
+    <Folder Include="google_antigravity\" />
+    <Folder Include="google_antigravity\sdk\" />
+    <Folder Include="tests\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="requirements.txt" />
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
+</Project>

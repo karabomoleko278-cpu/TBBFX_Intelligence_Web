@@ -1,0 +1,22 @@
+[
+  {
+    "name": "AzureSignalRConnectionString",
+    "value": "SET_IN_AZURE_PORTAL_OR_KEY_VAULT"
+  },
+  {
+    "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+    "value": "SET_IN_AZURE_PORTAL_OR_KEY_VAULT"
+  },
+  {
+    "name": "TBBFX_PUBLIC_READONLY",
+    "value": "true"
+  },
+  {
+    "name": "TBBFX_ALLOWED_ORIGINS",
+    "value": "https://YOUR_PUBLIC_TBBFX_DOMAIN"
+  },
+  {
+    "name": "TBBFX_FEATURE_UPDATE_KEY",
+    "value": "SET_LONG_RANDOM_SECRET_IN_AZURE_PORTAL_OR_KEY_VAULT"
+  }
+]

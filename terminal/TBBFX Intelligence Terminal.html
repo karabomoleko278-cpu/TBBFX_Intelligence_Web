@@ -1,0 +1,1986 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TBBFX Intelligence Terminal</title>
+<style>
+  /* ===================================================================
+     DESIGN TOKENS
+     High-visibility palette tuned for the dark / neon-green institutional
+     theme. Text tokens are deliberately brighter than the mock so every
+     label clears a comfortable contrast ratio on the dark panels.
+     =================================================================== */
+  :root {
+    --bg:            #060d0b;
+    --bg-2:          #081311;
+    --panel:         #0b1a16;
+    --panel-2:       #0e211b;
+    --panel-inset:   #07120f;
+    --border:        rgba(46, 230, 166, 0.16);
+    --border-strong: rgba(46, 230, 166, 0.34);
+
+    --neon:          #2ee6a6;   /* primary neon green */
+    --neon-bright:   #4ff7be;   /* hover / emphasis   */
+    --neon-dim:      #1c8f6b;
+    --cyan:          #59d6e8;   /* price line / accents */
+    --amber:         #f3b13f;   /* countdown / caution */
+
+    --pos:           #34d99a;   /* positive change */
+    --neg:           #ef5f54;   /* negative change */
+
+    --bid:           #27c47e;   /* OBI bid bars */
+    --ask:           #e8564c;   /* OBI ask bars */
+
+    /* Text ramp — all AA+ against --panel */
+    --text:          #e9f4f0;
+    --text-2:        #aebfb8;
+    --text-dim:      #7e948c;
+    --text-faint:    #5a6f67;
+
+    --radius:        12px;
+    --radius-sm:     7px;
+    --gap:           14px;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: var(--sans);
+    color: var(--text);
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(46,230,166,0.07), transparent 60%),
+      radial-gradient(900px 500px at 100% 110%, rgba(89,214,232,0.05), transparent 55%),
+      var(--bg);
+    font-size: 13px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ===================== SYMBOL COMMAND BAR ===================== */
+  .symbolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--bg-2), transparent);
+  }
+  .symbolbar .barlabel {
+    font-size: 8.5px; letter-spacing: 1.6px; text-transform: uppercase;
+    color: var(--text-faint); margin-right: 4px;
+  }
+  .symtab {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 700; letter-spacing: 1px;
+    color: var(--text);
+    padding: 7px 17px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.045);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    transition: color .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
+    white-space: nowrap;
+  }
+  .symtab:hover { border-color: var(--border-strong); color: var(--neon-bright); }
+  .symtab.active {
+    color: #04130d;
+    background: var(--neon);
+    border: 1.5px solid var(--neon-bright);
+    box-shadow: 0 0 16px rgba(46,230,166,0.55), inset 0 0 6px rgba(255,255,255,0.25);
+  }
+
+  /* Smooth left-to-right fade-in when the active asset changes (no bg flash). */
+  @keyframes panelSwap { from { opacity: .2; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+  main.swapping { animation: panelSwap .28s cubic-bezier(.22,.61,.36,1); }
+
+  /* ===================== TOP BAR ===================== */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: var(--gap);
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--bg-2), transparent);
+    flex-wrap: wrap;
+  }
+
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 230px; }
+  .brand .logo {
+    width: 42px; height: 42px; border-radius: 10px;
+    border: 1px solid var(--border-strong);
+    background: radial-gradient(circle at 30% 30%, rgba(46,230,166,0.22), rgba(8,19,17,0.6));
+    display: grid; place-items: center;
+    box-shadow: 0 0 18px rgba(46,230,166,0.12) inset;
+  }
+  .brand .logo svg { width: 24px; height: 24px; }
+  .brand .titles .t1 { font-weight: 800; letter-spacing: 1px; font-size: 16px; color: var(--text); }
+  .brand .titles .t2 {
+    font-weight: 800; letter-spacing: 2px; font-size: 16px;
+    color: var(--neon); text-shadow: 0 0 14px rgba(46,230,166,0.45); margin-top: -2px;
+  }
+  .brand .titles .t3 {
+    font-size: 8.5px; letter-spacing: 1.6px; color: var(--text-faint);
+    text-transform: uppercase; margin-top: 4px; line-height: 1.5;
+  }
+
+  /* Macro + market status pill */
+  .statuspill {
+    flex: 1 1 480px;
+    display: flex; align-items: center; gap: 18px;
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    overflow: hidden;
+  }
+  .macro { display: flex; align-items: center; gap: 10px; padding-right: 16px; border-right: 1px solid var(--border); }
+  .macro .clock { color: var(--amber); width: 18px; height: 18px; flex: none; }
+  .macro .labels .ml1 { font-size: 8.5px; letter-spacing: 1.5px; color: var(--text-faint); text-transform: uppercase; }
+  .macro .labels .ml2 { font-size: 11px; color: var(--text-2); font-weight: 600; }
+  .macro .countdown { font-family: var(--mono); font-size: 20px; font-weight: 700; color: var(--amber); letter-spacing: 1px; text-shadow: 0 0 12px rgba(243,177,63,0.35); }
+
+  .chips { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .chip { display: flex; align-items: center; gap: 7px; }
+  .chip .tag {
+    font-size: 8.5px; letter-spacing: 1px; font-weight: 700; color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; text-transform: uppercase;
+  }
+  .chip .k { font-size: 10px; color: var(--text-dim); letter-spacing: 0.5px; }
+  .chip .v { font-family: var(--mono); font-size: 12.5px; color: var(--text); font-weight: 600; }
+  .chip .d { font-family: var(--mono); font-size: 11px; }
+  .up { color: var(--pos); } .down { color: var(--neg); }
+
+  .online {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 14px; border-radius: var(--radius);
+    border: 1px solid var(--border-strong);
+    background: rgba(46,230,166,0.06);
+    min-width: 150px;
+  }
+  .online .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 10px var(--neon); animation: pulse 1.8s infinite; }
+  .online .dot.sim { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+  .online .txt { font-size: 9px; letter-spacing: 1.3px; line-height: 1.45; text-transform: uppercase; }
+  .online .txt b { color: var(--neon); display: block; font-size: 10px; letter-spacing: 1.4px; }
+  .online .dot.sim ~ .txt b { color: var(--amber); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* ===================== LAYOUT GRID ===================== */
+  main {
+    /* grow to fill a tall screen, but never shrink below content height
+       (shrinking is what let the dark-pool panel collide with the footer) */
+    flex: 1 0 auto;
+    display: grid;
+    grid-template-columns: 1.62fr 1fr;
+    gap: var(--gap);
+    padding: var(--gap);
+    align-items: start;
+  }
+  .col { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+
+  /* ===================== PANELS ===================== */
+  .panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    overflow: hidden;
+    position: relative;
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .badge {
+    font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.5px;
+    color: var(--neon); border: 1px solid var(--border-strong);
+    border-radius: 5px; padding: 2px 6px; background: rgba(46,230,166,0.06); flex: none;
+  }
+  .panel-head h2 { font-size: 12px; letter-spacing: 1.2px; font-weight: 700; color: var(--text); text-transform: uppercase; }
+  .panel-head .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .panel-body { padding: 14px; }
+
+  .seg { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-dim);
+    background: transparent; border: none; padding: 4px 11px; cursor: pointer; letter-spacing: 0.5px;
+  }
+  .seg button.active { color: var(--bg); background: var(--neon); font-weight: 700; }
+  .seg button + button { border-left: 1px solid var(--border); }
+
+  .subtag { font-size: 9px; letter-spacing: 1.3px; color: var(--text-dim); text-transform: uppercase; }
+  .streaming { display: flex; align-items: center; gap: 6px; font-size: 9px; letter-spacing: 1.3px; color: var(--neon); text-transform: uppercase; }
+  .streaming .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 8px var(--neon); animation: pulse 1.4s infinite; }
+
+  /* ---- Heatmap ---- */
+  .heatwrap { position: relative; }
+  #heatmap { width: 100%; height: 188px; display: block; border-radius: var(--radius-sm); background: var(--panel-inset); }
+  .overlay-tag {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    font-family: var(--mono); font-weight: 700; padding: 6px 12px; border-radius: 6px;
+    backdrop-filter: blur(3px); border: 1px solid var(--border-strong);
+  }
+  .overlay-tag.price { left: 12px; color: var(--text); background: rgba(7,18,15,0.78); font-size: 15px; }
+  .overlay-tag.delta { right: 12px; color: var(--pos); background: rgba(7,18,15,0.7); font-size: 14px; }
+  .legend { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .legend .label { font-size: 8.5px; letter-spacing: 1.2px; color: var(--text-dim); text-transform: uppercase; }
+  .legend .bar { flex: 1; height: 8px; border-radius: 4px;
+    background: linear-gradient(90deg, #0a2a3a, #0e6e6e 35%, #e0a030 72%, #e0443a); }
+
+  /* ---- OBI ---- */
+  .obi-head, .obi-row { display: grid; grid-template-columns: 34px 1fr 64px 1fr 34px; align-items: center; gap: 10px; }
+  .obi-head { padding: 0 2px 8px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+  .obi-head span { font-size: 8.5px; letter-spacing: 1px; color: var(--text-dim); text-transform: uppercase; }
+  .obi-head .c { text-align: center; } .obi-head .r { text-align: right; }
+  .obi-row { padding: 5px 2px; }
+  .obi-row .lvl { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  .obi-row .lvl.a { text-align: right; }
+  .obi-row .spread { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+  .bartrack { position: relative; height: 20px; border-radius: 4px; background: var(--panel-inset); overflow: hidden; }
+  .bartrack .fill { position: absolute; top: 0; bottom: 0; opacity: 0.85; transition: width 0.4s ease; }
+  .bartrack.bid .fill { right: 0; background: linear-gradient(90deg, rgba(39,196,126,0.15), var(--bid)); }
+  .bartrack.ask .fill { left: 0; background: linear-gradient(90deg, var(--ask), rgba(232,86,76,0.15)); }
+  .bartrack .n { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; font-family: var(--mono); font-size: 11px; font-weight: 600; color: #fff; padding: 0 8px; }
+  .bartrack.bid .n { right: 0; } .bartrack.ask .n { left: 0; }
+
+  /* ---- Dark pool ---- */
+  table.dp { width: 100%; border-collapse: collapse; }
+  table.dp th { font-size: 8.5px; letter-spacing: 1px; color: var(--text-dim); text-transform: uppercase; text-align: left; padding: 0 8px 8px; font-weight: 600; }
+  table.dp td { font-family: var(--mono); font-size: 11px; padding: 5px 8px; border-top: 1px solid rgba(46,230,166,0.06); color: var(--text-2); }
+  table.dp td.tk { color: var(--text); font-weight: 700; }
+  table.dp td.px { color: var(--cyan); }
+  table.dp td.vn { color: var(--neon); }
+  table.dp tr { animation: fadein 0.5s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  /* ---- GEX regime ---- */
+  .regime { display: flex; align-items: center; gap: 16px; padding: 8px 4px 16px; }
+  .regime .ring { width: 64px; height: 64px; flex: none; }
+  .regime .meta .rlabel { font-size: 9px; letter-spacing: 1.4px; color: var(--text-dim); text-transform: uppercase; }
+  .regime .meta .rname { font-size: 23px; font-weight: 800; color: var(--neon); text-shadow: 0 0 16px rgba(46,230,166,0.4); margin: 2px 0; }
+  .regime .meta .rdesc { font-size: 11px; color: var(--text-2); }
+  .regime-toggle { display: flex; gap: 8px; }
+  .pill {
+    flex: 1; text-align: center; font-size: 10.5px; letter-spacing: 1.2px; font-weight: 700;
+    padding: 10px; border-radius: 8px; border: 1px solid var(--border); text-transform: uppercase;
+    color: var(--text-dim); background: var(--panel-inset); cursor: default;
+  }
+  .pill.active.pos { color: var(--neon); border-color: var(--border-strong); background: rgba(46,230,166,0.08); box-shadow: 0 0 18px rgba(46,230,166,0.1) inset; }
+  .pill.active.neg { color: var(--neg); border-color: rgba(239,95,84,0.4); background: rgba(239,95,84,0.08); }
+
+  /* ---- Greeks ---- */
+  .greek { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 12px; padding: 12px 0; }
+  .greek + .greek { border-top: 1px solid var(--border); }
+  .greek .g1 { font-size: 15px; font-weight: 800; color: var(--text); letter-spacing: 1px; }
+  .greek .g2 { font-size: 8.5px; letter-spacing: 1.2px; color: var(--text-dim); text-transform: uppercase; }
+  .diverge { position: relative; height: 22px; border-radius: 5px; background: var(--panel-inset); }
+  .diverge .zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--border-strong); }
+  .diverge .fill { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; transition: all 0.5s ease; }
+  .diverge .fill.pos { left: 50%; background: linear-gradient(90deg, rgba(52,217,154,0.2), var(--pos)); }
+  .diverge .fill.neg { right: 50%; background: linear-gradient(90deg, var(--neg), rgba(239,95,84,0.2)); }
+  .diverge .val { position: absolute; top: 50%; transform: translateY(-50%); font-family: var(--mono); font-size: 10.5px; font-weight: 700; color: var(--text); }
+
+  /* ===================== FOOTER ===================== */
+  footer {
+    display: flex; align-items: center; gap: 18px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    background: linear-gradient(0deg, var(--bg-2), transparent);
+    flex-wrap: wrap;
+  }
+  .meta { display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: var(--text-dim); }
+  .meta .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 8px var(--neon); }
+  .meta .num { color: var(--text-2); }
+  .sep { color: var(--text-faint); }
+  footer .actions { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .runbtn {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--bg); cursor: pointer; border: none;
+    padding: 12px 26px; border-radius: 24px;
+    background: linear-gradient(180deg, var(--neon-bright), var(--neon));
+    box-shadow: 0 0 22px rgba(46,230,166,0.35);
+    transition: transform 0.1s ease, box-shadow 0.2s ease;
+  }
+  .runbtn:hover { box-shadow: 0 0 30px rgba(46,230,166,0.55); }
+  .runbtn:active { transform: translateY(1px) scale(0.99); }
+  .runbtn svg { width: 16px; height: 16px; }
+  .iconbtn {
+    display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px;
+    border: 1px solid var(--border-strong); background: rgba(46,230,166,0.05); color: var(--neon); cursor: pointer;
+  }
+  .iconbtn:hover { background: rgba(46,230,166,0.12); }
+
+  @media (max-width: 1080px) {
+    main { grid-template-columns: 1fr; }
+  }
+  #val-mc-chart, #val-cluster-chart, #val-wf-chart {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+  }
+</style>
+<script src="./config.public.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- ===================== TOP BAR ===================== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2ee6a6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/>
+          <path d="M7 6l10 12M17 6L7 18"/>
+        </svg>
+      </div>
+      <div class="titles">
+        <div class="t1">TBBFX</div>
+        <div class="t2">INTELLIGENCE</div>
+        <div class="t3">MICROSTRUCTURE REFINERY<br>OPTIONS · EXPOSURE ENGINE</div>
+      </div>
+    </div>
+
+    <div class="statuspill">
+      <div class="macro">
+        <svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <div class="labels">
+          <div class="ml1">Next Macro Event</div>
+          <div class="ml2" id="macro-title">FOMC Rate Decision</div>
+        </div>
+        <div class="countdown num" id="countdown">02:14:29</div>
+      </div>
+      <div class="chips">
+        <div class="chip"><span class="tag">FX</span><span class="k">DXY</span><span class="v num" id="dxy">103.42</span><span class="d up" id="dxy-d">+0.18%</span></div>
+        <div class="chip"><span class="tag">Rates</span><span class="k">US10Y</span><span class="v num" id="us10y">4.284%</span><span class="d down" id="us10y-d">-2.1bp</span></div>
+        <div class="chip"><span class="tag">Vol</span><span class="k">VIX</span><span class="v num" id="vix">13.96</span><span class="d down" id="vix-d">-0.44</span></div>
+        <div class="chip"><span class="tag">EQ</span><span class="k">ES Fut</span><span class="v num" id="esfut">5291.5</span><span class="d up" id="esfut-d">+0.21%</span></div>
+      </div>
+    </div>
+
+    <div class="online" id="online">
+      <div class="dot" id="online-dot"></div>
+      <div class="txt">Online<br><b id="online-state">— LIVE STREAM ACTIVE</b></div>
+    </div>
+  </header>
+
+  <!-- ===================== SYMBOL COMMAND BAR ===================== -->
+  <nav class="symbolbar" id="symbolbar" aria-label="Active asset selector">
+    <span class="barlabel">Isolated Asset</span>
+    <button class="symtab" data-sym="EURUSD">EURUSD</button>
+    <button class="symtab" data-sym="GBPUSD">GBPUSD</button>
+    <button class="symtab active" data-sym="XAUUSD">XAUUSD</button>
+    <button class="symtab" data-sym="US30">US30</button>
+    <button class="symtab" data-sym="USTEC">USTEC</button>
+    <button class="symtab" data-sym="USDJPY">USDJPY</button>
+    
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+      <span class="barlabel">Mode</span>
+      <div class="seg" id="view-seg">
+        <button data-view="live" class="active">Live Feed</button>
+        <button data-view="validation">Validation</button>
+        <button data-view="orderflow">Order Flow</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ===================== MAIN GRID ===================== -->
+  <div id="live-view-container">
+  <main>
+    <!-- LEFT COLUMN -->
+    <div class="col">
+      <!-- 2A.1 Liquidity heatmap -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">2A.1</span>
+          <h2>Liquidity Heatmap · Volume Footprint</h2>
+          <div class="right">
+            <div class="seg" id="tf-seg">
+              <button data-tf="1m">1m</button>
+              <button data-tf="5m" class="active">5m</button>
+              <button data-tf="15m">15m</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="heatwrap">
+            <canvas id="heatmap"></canvas>
+            <div class="overlay-tag price num" id="hm-price">5289.28</div>
+            <div class="overlay-tag delta num" id="hm-delta">+23.1K</div>
+          </div>
+          <div class="legend">
+            <span class="label">Low</span>
+            <div class="bar"></div>
+            <span class="label">High Liquidity</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2A.2 OBI -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">2A.2</span>
+          <h2>Order Block Imbalance (OBI)</h2>
+          <div class="right"><span class="subtag">L1 → L5 Depth</span></div>
+        </div>
+        <div class="panel-body">
+          <div class="obi-head">
+            <span>Lvl</span><span>Bid Size</span><span class="c">Spread</span><span class="r">Ask Size</span><span class="r">Lvl</span>
+          </div>
+          <div id="obi-rows"></div>
+        </div>
+      </section>
+
+      <!-- 2A.3 Dark pool -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">2A.3</span>
+          <h2>Dark Pool Transaction Tracker</h2>
+          <div class="right"><span class="streaming"><span class="dot"></span>Streaming</span></div>
+        </div>
+        <div class="panel-body">
+          <table class="dp">
+            <thead><tr><th>Timestamp</th><th>Ticker</th><th>Price</th><th>Size</th><th>Notional</th><th>Venue</th></tr></thead>
+            <tbody id="dp-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="col">
+      <!-- 2B.1 GEX regime -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">2B.1</span>
+          <h2>Options GEX · Volatility Regime</h2>
+        </div>
+        <div class="panel-body">
+          <div class="regime">
+            <svg class="ring" id="regime-ring" viewBox="0 0 64 64">
+              <circle cx="32" cy="32" r="27" fill="none" stroke="rgba(46,230,166,0.15)" stroke-width="4"/>
+              <circle cx="32" cy="32" r="27" fill="none" stroke="#2ee6a6" stroke-width="4" stroke-linecap="round"
+                      stroke-dasharray="170" stroke-dashoffset="55" transform="rotate(-90 32 32)"/>
+              <path d="M22 36l6-7 5 4 9-11" fill="none" stroke="#2ee6a6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div class="meta">
+              <div class="rlabel">Current Regime</div>
+              <div class="rname" id="regime-name">Positive Gamma</div>
+              <div class="rdesc" id="regime-desc">Dealers long gamma · vol-suppressive · reverting</div>
+            </div>
+          </div>
+          <div class="regime-toggle">
+            <div class="pill pos active" id="pill-pos">Positive Gamma</div>
+            <div class="pill neg" id="pill-neg">Negative Gamma</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2B.2 Higher-order greeks -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">2B.2</span>
+          <h2>Higher-Order Greek Profiles</h2>
+        </div>
+        <div class="panel-body" id="greeks">
+          <div class="greek" data-g="dex">
+            <div><div class="g1">DEX</div><div class="g2">Delta Exposure</div></div>
+            <div class="diverge"><div class="zero"></div><div class="fill"></div><div class="val"></div></div>
+          </div>
+          <div class="greek" data-g="vex">
+            <div><div class="g1">VEX</div><div class="g2">Vanna Exposure</div></div>
+            <div class="diverge"><div class="zero"></div><div class="fill"></div><div class="val"></div></div>
+          </div>
+          <div class="greek" data-g="chex">
+            <div><div class="g1">CHEX</div><div class="g2">Charm Exposure</div></div>
+            <div class="diverge"><div class="zero"></div><div class="fill"></div><div class="val"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2B.3 Composite Market Momentum -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">2B.3</span>
+          <h2>Composite Market Momentum</h2>
+          <span style="margin-left:auto;color:var(--muted);letter-spacing:.2em;font-size:11px;font-weight:600;">WEIGHTED SCORE</span>
+        </div>
+        <div class="panel-body">
+          <div style="display:flex;justify-content:center;align-items:center;padding:10px 0 4px;">
+            <div style="position:relative;width:210px;height:150px;">
+              <svg viewBox="-6 -6 132 132" style="width:100%;height:100%;overflow:visible;">
+                <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,.07)"
+                        stroke-width="9" stroke-linecap="round"
+                        stroke-dasharray="235.6 314.2" transform="rotate(135 60 60)"/>
+                <circle id="mom-arc" cx="60" cy="60" r="50" fill="none" stroke="#e0a838"
+                        stroke-width="9" stroke-linecap="round"
+                        stroke-dasharray="0 314.2" transform="rotate(135 60 60)"
+                        style="transition:stroke-dasharray .6s ease, stroke .4s ease;"/>
+              </svg>
+              <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+                <div id="mom-score" style="font-size:48px;font-weight:800;line-height:1;color:#fff;letter-spacing:-1px;">57</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:3px;">/ 100</div>
+                <div id="mom-label" style="margin-top:9px;padding:3px 13px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.1em;background:rgba(224,168,56,.16);color:#e0a838;">NEUTRAL</div>
+              </div>
+            </div>
+          </div>
+          <div id="mom-meta" style="text-align:center;color:var(--muted);font-size:10.5px;letter-spacing:.05em;margin-top:6px;">GEX · CVD · OBI weighted blend</div>
+        </div>
+      </section>
+    </div>
+  </main>
+  </div>
+
+  <!-- ===================== QUANTITATIVE VALIDATION BOARD ===================== -->
+  <div id="validation-view-container" style="display: none; padding: var(--gap); min-height: calc(100vh - 180px); display: flex; flex-direction: column; gap: var(--gap);">
+    <!-- CONTROL PANEL -->
+    <section class="panel" style="width: 100%; flex-shrink: 0;">
+      <div class="panel-head">
+        <span class="badge">CTRL</span>
+        <h2>Quantitative Validation Suite</h2>
+        <div class="right">
+          <span class="subtag" id="val-symbol-label">Active Symbol: XAUUSD</span>
+        </div>
+      </div>
+      <div class="panel-body" style="display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap;">
+        <button class="runbtn" id="val-run-btn" style="padding: 12px 28px; font-size: 12px;">
+          <svg viewBox="0 0 24 24" fill="currentColor" style="width:16px;height:16px;margin-right:6px;vertical-align:middle;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+          Run 4-Step Validation Suite
+        </button>
+        <button class="runbtn" id="runbtn" style="padding: 12px 28px; font-size: 12px;">
+          <svg viewBox="0 0 24 24" fill="currentColor" style="width:16px;height:16px;margin-right:6px;vertical-align:middle;"><path d="M8 5v14l11-7z"/></svg>
+          Run Next Optimization Iteration
+        </button>
+        <button class="iconbtn" id="exportbtn" title="Export snapshot" style="border-radius: 24px; width: 38px; height: 38px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+        </button>
+        <div style="flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 6px;">
+          <div style="display: flex; justify-content: space-between; font-size: 11px;">
+            <span id="val-progress-text" style="color: var(--text-dim);">Ready to stress-test parameters</span>
+            <span id="val-progress-pct" class="num" style="color: var(--neon); font-weight: 700;">0.0%</span>
+          </div>
+          <div style="width: 100%; height: 8px; border-radius: 4px; background: var(--panel-inset); border: 1px solid var(--border); overflow: hidden; position: relative;">
+            <div id="val-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--neon-dim), var(--neon)); transition: width 0.3s ease; box-shadow: 0 0 10px var(--neon);"></div>
+          </div>
+        </div>
+        <div id="val-status-msg" class="num" style="width: 100%; font-size: 11px; color: var(--text-2); background: var(--panel-inset); border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px; min-height: 32px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          SYSTEM STATE: Idle. Select a symbol and trigger validation to run statistical testing.
+        </div>
+      </div>
+    </section>
+
+    <!-- CHARTS GRID -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); flex: none;">
+      <!-- STEP 1: PARAMETER STABILITY HEATMAP -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">STEP 1</span>
+          <h2>Parameter Stability Heatmap</h2>
+          <div class="right">
+            <span class="subtag">Plateaus vs Fragile Spikes (Profit Factor)</span>
+          </div>
+        </div>
+        <div class="panel-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 320px; position: relative;">
+          <div id="val-heatmap-no-data" style="color: var(--text-faint); font-weight: 600;">Run validation to render stability matrix</div>
+          <div id="val-heatmap-container" style="width: 100%; display: none; flex-direction: column; gap: var(--gap);">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim);">
+              <span id="val-heatmap-y-label">Y: ATR Multiplier (2.50 to 3.50)</span>
+              <span id="val-heatmap-x-label">X: Moving Average Length (100 to 200 / 160 to 240)</span>
+            </div>
+            <div style="display: flex; justify-content: center; padding: 10px 0;">
+              <canvas id="val-heatmap-canvas" style="height: 188px; width: 100%; max-width: 450px; background: var(--panel-inset); border-radius: var(--radius-sm); border: 1px solid var(--border);"></canvas>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 9px; color: var(--text-dim); text-transform: uppercase;">
+              <span>Low Profit Factor</span>
+              <div style="flex: 1; height: 8px; margin: 0 12px; border-radius: 4px; background: linear-gradient(90deg, rgb(68,1,84), rgb(59,82,139), rgb(33,145,140), rgb(94,201,98), rgb(253,231,37));"></div>
+              <span>High Profit Factor</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP 2: MONTE CARLO SIMULATION -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">STEP 2</span>
+          <h2>Monte Carlo Simulation</h2>
+          <div class="right">
+            <span class="subtag">1,000 randomized bootstrap paths</span>
+          </div>
+        </div>
+        <div class="panel-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 320px; position: relative;">
+          <div id="val-mc-no-data" style="color: var(--text-faint); font-weight: 600;">Run validation to render equity probability bands</div>
+          <div id="val-mc-container" style="width: 100%; height: 100%; display: none; flex-direction: column; gap: var(--gap);">
+            <div style="height: 200px; width: 100%; position: relative;">
+              <canvas id="val-mc-chart"></canvas>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 5px;">
+              <div class="chip" style="display: flex; flex-direction: column; padding: 6px 12px; align-items: flex-start; background: var(--panel-inset); border-radius: 6px; border: 1px solid var(--border);">
+                <span style="font-size: 8.5px; color: var(--text-dim); text-transform: uppercase;">Risk of Ruin</span>
+                <span id="val-mc-ruin" style="font-size: 16px; font-weight: 800; color: var(--neg);">0.0%</span>
+              </div>
+              <div class="chip" style="display: flex; flex-direction: column; padding: 6px 12px; align-items: flex-start; background: var(--panel-inset); border-radius: 6px; border: 1px solid var(--border);">
+                <span style="font-size: 8.5px; color: var(--text-dim); text-transform: uppercase;">Survival Status</span>
+                <span id="val-mc-survival" style="font-size: 14px; font-weight: 800; color: var(--pos);">SURVIVES</span>
+              </div>
+              <div class="chip" style="display: flex; flex-direction: column; padding: 6px 12px; align-items: flex-start; background: var(--panel-inset); border-radius: 6px; border: 1px solid var(--border);">
+                <span style="font-size: 8.5px; color: var(--text-dim); text-transform: uppercase;">Median DD</span>
+                <span id="val-mc-dd" style="font-size: 16px; font-weight: 800; color: var(--amber);">0.0%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP 3: PERFORMANCE CLUSTERING -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">STEP 3</span>
+          <h2>K-Means Parameter Clustering</h2>
+          <div class="right">
+            <span class="subtag">Lloyd's partition projection</span>
+          </div>
+        </div>
+        <div class="panel-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 320px; position: relative;">
+          <div id="val-cluster-no-data" style="color: var(--text-faint); font-weight: 600;">Run validation to render cluster projection</div>
+          <div id="val-cluster-container" style="width: 100%; height: 100%; display: none; flex-direction: column; gap: var(--gap);">
+            <div style="height: 200px; width: 100%; position: relative;">
+              <canvas id="val-cluster-chart"></canvas>
+            </div>
+            <div id="val-cluster-legend" style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-2); background: var(--panel-inset); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);">
+              <!-- Cluster summaries -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP 4: WALK-FORWARD VALIDATION -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="badge">STEP 4</span>
+          <h2>Walk-Forward OOS Equity</h2>
+          <div class="right">
+            <span class="subtag">Stitched Out-of-Sample Curve</span>
+          </div>
+        </div>
+        <div class="panel-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 320px; position: relative;">
+          <div id="val-wf-no-data" style="color: var(--text-faint); font-weight: 600;">Run validation to render walk-forward equity curve</div>
+          <div id="val-wf-container" style="width: 100%; height: 100%; display: none; flex-direction: column; gap: var(--gap);">
+            <div style="height: 160px; width: 100%; position: relative;">
+              <canvas id="val-wf-chart"></canvas>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
+              <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <span style="font-size: 11px; color: var(--text-dim); font-weight: 600;">EXPECTANCY RATIO REPORT</span>
+                <span id="val-wf-status-badge" style="font-size: 9px; font-weight: 800; padding: 3px 10px; border-radius: 999px; text-transform: uppercase; border: 1px solid var(--border);">INACTIVE</span>
+              </div>
+              <div id="val-wf-report-text" style="font-size: 11px; color: var(--text-2); background: var(--panel-inset); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); line-height: 1.5; font-family: var(--mono); min-height: 50px;">
+                Run a validation pass to compute expectancy, profit factor, drawdown tolerance, and generate recommendations.
+              </div>
+            </div>
+          </div>
+          
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer>
+    <div class="meta"><span class="dot"></span>Engine feed nominal</div>
+    <span class="sep">·</span>
+    <div class="meta">Iteration <span class="num" id="iteration">#1,284</span></div>
+    <span class="sep">·</span>
+    <div class="meta">Last run <span class="num" id="lastrun">21s ago</span></div>
+    <span class="sep">·</span>
+    <div class="meta">Features piped <span class="num" id="piped">312</span></div>
+  </footer>
+
+<script>
+/* ===================================================================
+   TBBFX Intelligence Terminal — front-end controller
+   Tries the live FastAPI Feature Factory WebSocket; if unreachable,
+   transparently falls back to a local simulator so the terminal is
+   always alive. The ONLINE badge reflects which mode is active.
+   =================================================================== */
+(function () {
+  "use strict";
+
+  const PUBLIC_CONFIG = window.TBBFX_PUBLIC_CONFIG || {};
+  const isHttp = window.location.protocol === "http:" || window.location.protocol === "https:";
+  const sameOrigin = isHttp ? window.location.origin : "http://localhost:5000";
+  const publicMode = PUBLIC_CONFIG.publicMode !== false;
+  const joinUrl = (base, path) => {
+    if (!base) return "";
+    return String(base).replace(/\/$/, "") + path;
+  };
+
+  const CONFIG = {
+    // Centralized Feature Factory (FastAPI). NOTE: temporarily on :8010 because
+    // an orphaned socket from a process-restart wedged :8000 — a reboot frees it,
+    // after which these two lines can move back to :8000.
+    WS_URL: PUBLIC_CONFIG.featureWsUrl || (publicMode ? "" : "ws://localhost:8000/ws/features"),
+    // REST base for on-demand reads (momentum, exposure, greeks, volprofile, macro).
+    API_BASE: PUBLIC_CONFIG.featureFactoryBase || (publicMode ? "" : "http://localhost:8000"),
+    // SignalR URL for C# validation engine
+    SIGNALR_URL: PUBLIC_CONFIG.signalRUrl || (PUBLIC_CONFIG.signalRBase ? joinUrl(PUBLIC_CONFIG.signalRBase, "/hub/marketpulse") : (publicMode ? "" : "http://localhost:5000/hub/marketpulse")),
+    SIGNALR_MODE: PUBLIC_CONFIG.signalRMode || (publicMode ? "azure-signalr-serverless" : "aspnetcore-hub"),
+    // C# validation run API base
+    VALIDATION_API_BASE: PUBLIC_CONFIG.apiBase || (publicMode ? sameOrigin : "http://localhost:5000"),
+    PUBLIC_MODE: publicMode,
+    ALLOW_VALIDATION: PUBLIC_CONFIG.allowValidation === true,
+    ALLOW_TRADING: PUBLIC_CONFIG.allowTrading === true,
+    // TBBFX traded instruments (mirrors the MAUI app watchlist + MT5 charts).
+    SYMBOLS: ["XAUUSD", "USTEC", "US30", "EURUSD", "GBPUSD", "USDJPY"],
+    VENUES: ["UBS ATS", "SIGMA X", "CrossFinder", "MS POOL", "LX", "IEX D-Peg"],
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n, d = 2) => Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+  /* ---------------- Live state ---------------- */
+  const state = {
+    connected: false,
+    activeSymbol: "XAUUSD",   // the single isolated asset all panels bind to
+    activeView: "live",       // live vs validation
+    gexLive: false,           // true once real per-symbol GEX has loaded
+    greeksLive: false,        // true once real DEX/VEX/CHEX has loaded
+    heatmapLive: false,       // true once a real volume profile has loaded
+    volProfile: null,         // real volume-by-price (low→high), length ROWS
+    depthLive: false,         // true once a real broker DOM ladder is streaming
+    price: 5289.28,
+    delta: 23100,
+    obi: 0.12,
+    cvd: 0,
+    netGex: 1,
+  };
+
+  let mcChartInstance = null;
+  let clusterChartInstance = null;
+  let wfChartInstance = null;
+  let signalrConn = null;
+  let signalrSubscribedSymbol = null;
+  const feedStatus = { ws: false, signalr: false };
+
+  /* ============================================================
+     1. HEATMAP (canvas)
+     ============================================================ */
+  const canvas = $("heatmap");
+  const ctx = canvas.getContext("2d");
+  const COLS = 96, ROWS = 26;
+  let grid = [];
+
+  function seedGrid() {
+    grid = [];
+    for (let c = 0; c < COLS; c++) grid.push(newColumn(c));
+  }
+  function newColumn() {
+    const col = new Array(ROWS);
+    const prof = state.volProfile; // real volume-by-price (low→high), length ROWS
+    if (prof && prof.length === ROWS) {
+      for (let r = 0; r < ROWS; r++) {
+        // grid row 0 = top = highest price, so invert the low→high profile
+        const base = prof[ROWS - 1 - r];
+        col[r] = Math.max(0, Math.min(1, base * (0.75 + Math.random() * 0.4)));
+      }
+      return col;
+    }
+    const band = ROWS / 2 + (Math.random() - 0.5) * 4;
+    for (let r = 0; r < ROWS; r++) {
+      const dist = Math.abs(r - band) / ROWS;
+      col[r] = Math.max(0, Math.min(1, (1 - dist * 1.8) * (0.55 + Math.random() * 0.6)));
+    }
+    return col;
+  }
+  // Blue → teal → orange → red colormap.
+  function heatColor(v) {
+    const stops = [[10,42,58],[14,110,110],[224,160,48],[224,68,58]];
+    const x = Math.max(0, Math.min(0.999, v)) * (stops.length - 1);
+    const i = Math.floor(x), f = x - i;
+    const a = stops[i], b = stops[i + 1] || stops[i];
+    return `rgb(${a[0]+(b[0]-a[0])*f|0},${a[1]+(b[1]-a[1])*f|0},${a[2]+(b[2]-a[2])*f|0})`;
+  }
+
+  let priceLine = new Array(COLS).fill(0.5);
+
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function drawHeatmap() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    const cw = w / COLS, ch = h / ROWS;
+    for (let c = 0; c < COLS; c++) {
+      for (let r = 0; r < ROWS; r++) {
+        ctx.fillStyle = heatColor(grid[c][r]);
+        ctx.globalAlpha = 0.32 + grid[c][r] * 0.68;
+        ctx.fillRect(c * cw, r * ch, cw + 0.6, ch + 0.6);
+      }
+    }
+    ctx.globalAlpha = 1;
+    // Cyan price line.
+    ctx.beginPath();
+    ctx.lineWidth = 1.6; ctx.strokeStyle = "#59d6e8"; ctx.shadowColor = "#59d6e8"; ctx.shadowBlur = 6;
+    for (let c = 0; c < COLS; c++) {
+      const y = priceLine[c] * h;
+      c === 0 ? ctx.moveTo(0, y) : ctx.lineTo(c * cw, y);
+    }
+    ctx.stroke(); ctx.shadowBlur = 0;
+  }
+
+  function stepHeatmap() {
+    grid.shift(); grid.push(newColumn());
+    const last = priceLine[COLS - 1] + (Math.random() - 0.5) * 0.06;
+    priceLine.shift(); priceLine.push(Math.max(0.12, Math.min(0.88, last)));
+    drawHeatmap();
+  }
+
+  /* ============================================================
+     2. OBI rows (L1–L5)
+     ============================================================ */
+  const obiRows = $("obi-rows");
+  const OBI_LEVELS = 5;
+  let obiData = [];
+  function seedObi() {
+    obiData = [];
+    for (let i = 0; i < OBI_LEVELS; i++) {
+      obiData.push({ bid: 80 + Math.random() * 500, ask: 60 + Math.random() * 500, spread: 0.3 + i * 0.25 + Math.random() * 0.2 });
+    }
+    obiRows.innerHTML = obiData.map((d, i) => `
+      <div class="obi-row" data-i="${i}">
+        <div class="lvl">L${i + 1}</div>
+        <div class="bartrack bid"><div class="fill"></div><div class="n"></div></div>
+        <div class="spread">${fmt(d.spread)}</div>
+        <div class="bartrack ask"><div class="fill"></div><div class="n"></div></div>
+        <div class="lvl a">A${i + 1}</div>
+      </div>`).join("");
+    renderObi();
+  }
+  function renderObi() {
+    const maxV = Math.max(...obiData.flatMap(d => [d.bid, d.ask]), 1);
+    [...obiRows.children].forEach((row, i) => {
+      const d = obiData[i];
+      const bid = row.querySelector(".bid"), ask = row.querySelector(".ask");
+      bid.querySelector(".fill").style.width = (d.bid / maxV * 100) + "%";
+      bid.querySelector(".n").textContent = Math.round(d.bid);
+      ask.querySelector(".fill").style.width = (d.ask / maxV * 100) + "%";
+      ask.querySelector(".n").textContent = Math.round(d.ask);
+      row.querySelector(".spread").textContent = fmt(d.spread);
+    });
+  }
+  function stepObi() {
+    if (state.depthLive) return; // real broker DOM is driving the ladder
+    obiData.forEach(d => {
+      d.bid = Math.max(40, d.bid + (Math.random() - 0.5) * 140);
+      d.ask = Math.max(40, d.ask + (Math.random() - 0.5) * 140);
+    });
+    renderObi();
+  }
+
+  /* ============================================================
+     3. Dark pool tracker
+     ============================================================ */
+  const dpRows = $("dp-rows");
+  // Realistic price bands per traded instrument (approx. mid-2026 levels).
+  const PRICE_BANDS = {
+    XAUUSD: [4400, 4600], USTEC: [20000, 21000], US30: [42000, 44000],
+    EURUSD: [1.06, 1.10], GBPUSD: [1.24, 1.28], USDJPY: [150, 158],
+  };
+  function addDarkPoolPrint() {
+    // Isolated tape: only the active asset's block prints (real TRF feed would
+    // arrive globally and be filtered here: `if (trade.symbol !== active) return;`).
+    const tk = state.activeSymbol;
+    const band = PRICE_BANDS[tk] || [50, 650];
+    const px = band[0] + Math.random() * (band[1] - band[0]);
+    const isFx = px < 10;
+    const size = (Math.random() * 90 + 5) * (isFx ? 100000 : 100) | 0; // FX in units, others in shares/contracts
+    const notional = px * size;
+    const venue = CONFIG.VENUES[Math.random() * CONFIG.VENUES.length | 0];
+    const t = new Date();
+    const ts = t.toLocaleTimeString("en-US", { hour12: false }) + "." + String(t.getMilliseconds()).padStart(3, "0");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${ts}</td><td class="tk">${tk}</td><td class="px">${fmt(px, isFx ? 5 : 2)}</td>
+      <td>${size.toLocaleString()}</td><td class="vn">$${(notional / 1e6).toFixed(2)}M</td><td>${venue}</td>`;
+    dpRows.prepend(tr);
+    while (dpRows.children.length > 8) dpRows.removeChild(dpRows.lastChild);
+  }
+
+  /* ============================================================
+     4. Higher-order greeks (DEX / VEX / CHEX)
+     ============================================================ */
+  const greekState = { dex: 0.62, vex: -0.38, chex: 0.18 };
+  function renderGreeks() {
+    document.querySelectorAll(".greek").forEach(el => {
+      const v = greekState[el.dataset.g];
+      const fill = el.querySelector(".fill"), val = el.querySelector(".val");
+      const pct = Math.min(Math.abs(v), 1) * 50;
+      fill.className = "fill " + (v >= 0 ? "pos" : "neg");
+      fill.style.width = pct + "%";
+      val.textContent = (v >= 0 ? "+" : "") + v.toFixed(2);
+      if (v >= 0) { val.style.left = "calc(50% + 8px)"; val.style.right = "auto"; }
+      else { val.style.right = "calc(50% + 8px)"; val.style.left = "auto"; }
+    });
+  }
+  function stepGreeks() {
+    if (state.greeksLive) return; // real DEX/VEX/CHEX loaded — don't random-walk them
+    for (const k in greekState) {
+      greekState[k] = Math.max(-0.98, Math.min(0.98, greekState[k] + (Math.random() - 0.5) * 0.12));
+    }
+    renderGreeks();
+  }
+
+  /* ============================================================
+     4b. Composite Market Momentum (panel 2B.3) — server-scored
+     ============================================================ */
+  const MOM = { C: 314.159, ARC: 235.619 };  // r=50 circumference & 270° arc
+  const momColor = (label) =>
+    label === "BULLISH" ? "var(--pos)" : label === "BEARISH" ? "var(--neg)" : "#e0a838";
+  const momBg = (label) =>
+    label === "BULLISH" ? "rgba(46,230,166,.16)" : label === "BEARISH" ? "rgba(239,95,84,.16)" : "rgba(224,168,56,.16)";
+  const labelForScore = (s) => (s > 60 ? "BULLISH" : s < 40 ? "BEARISH" : "NEUTRAL");
+
+  function renderMomentum(score, label, meta) {
+    score = Math.max(0, Math.min(100, Number(score) || 0));
+    const arc = $("mom-arc"), col = momColor(label);
+    arc.setAttribute("stroke-dasharray", `${(score / 100 * MOM.ARC).toFixed(1)} ${MOM.C}`);
+    arc.setAttribute("stroke", col);
+    $("mom-score").textContent = Math.round(score);
+    const pill = $("mom-label");
+    pill.textContent = label;
+    pill.style.color = col;
+    pill.style.background = momBg(label);
+    if (meta) $("mom-meta").textContent = meta;
+  }
+
+  // Client-side fallback so the gauge stays alive when the API is unreachable
+  // (mirrors the simulator philosophy of the rest of the terminal). Uses only
+  // the live OBI + CVD in `state`; GEX needs the server, so it's omitted here.
+  function localMomentum() {
+    const obi = Math.max(-1, Math.min(1, state.obi || 0));
+    const cvd = Math.tanh((state.cvd || 0) / 5000);
+    return 50 + 50 * (0.55 * obi + 0.45 * cvd);
+  }
+
+  async function refreshMomentum() {
+    const sym = state.activeSymbol;
+    try {
+      const r = await fetch(`${CONFIG.API_BASE}/api/momentum/${sym}`, { cache: "no-store" });
+      if (!r.ok) throw new Error("bad status");
+      const d = await r.json();
+      if (sym !== state.activeSymbol) return; // tab changed mid-flight — drop stale
+      renderMomentum(d.score, d.label, `${sym} · GEX·CVD·OBI · live`);
+    } catch (_) {
+      const s = localMomentum();
+      renderMomentum(s, labelForScore(s), `${sym} · OBI·CVD · simulated`);
+    }
+  }
+
+  // Real US 10-year treasury yield for the macro header (Massive, when entitled).
+  async function refreshMacro() {
+    try {
+      const r = await fetch(CONFIG.API_BASE + "/api/macro", { cache: "no-store" });
+      if (!r.ok) throw new Error("bad status");
+      const d = await r.json();
+      if (typeof d.us10y === "number") $("us10y").textContent = d.us10y.toFixed(3) + "%";
+    } catch (_) { /* keep the prior header value */ }
+  }
+
+  // Per-symbol GEX regime from the Feature Factory (reads SQLite / yfinance proxy
+  // server-side — the browser can't touch SQLite directly).
+  async function refreshGex(sym) {
+    try {
+      const r = await fetch(`${CONFIG.API_BASE}/api/exposure/${sym}`, { cache: "no-store" });
+      if (!r.ok) throw new Error("bad status");
+      const d = await r.json();
+      if (sym !== state.activeSymbol) return; // stale response after a tab switch
+      state.gexLive = true;
+      const negative = (d.regime || "").toUpperCase() === "NEGATIVE";
+      setRegime(!negative);
+      const proxy = d.options_proxy && d.options_proxy !== sym ? ` · via ${d.options_proxy}` : "";
+      $("regime-desc").textContent = negative
+        ? `${sym} · dealers short gamma · vol-amplifying${proxy}`
+        : `${sym} · dealers long gamma · vol-suppressive${proxy}`;
+    } catch (_) {
+      state.gexLive = false; // fall back to the simulated regime ticker
+    }
+  }
+
+  // Real per-symbol DEX/VEX/CHEX (delta/vanna/charm exposure tilts) aggregated
+  // from the options chain server-side. Overrides the per-asset sim when it lands.
+  async function refreshGreeks(sym) {
+    try {
+      const r = await fetch(`${CONFIG.API_BASE}/api/greeks/${sym}`, { cache: "no-store" });
+      if (!r.ok) throw new Error("bad status");
+      const d = await r.json();
+      if (sym !== state.activeSymbol) return; // stale after a tab switch
+      greekState.dex = +(+d.dex || 0).toFixed(2);
+      greekState.vex = +(+d.vex || 0).toFixed(2);
+      greekState.chex = +(+d.chex || 0).toFixed(2);
+      state.greeksLive = true;
+      renderGreeks();
+    } catch (_) { state.greeksLive = false; }
+  }
+
+  // Real volume-by-price footprint for the active symbol's proxy. Drives the
+  // heatmap intensity (per price row) and anchors the price line to real closes.
+  async function refreshHeatmap(sym) {
+    try {
+      const r = await fetch(`${CONFIG.API_BASE}/api/volprofile/${sym}`, { cache: "no-store" });
+      if (!r.ok) throw new Error("bad status");
+      const d = await r.json();
+      if (sym !== state.activeSymbol) return;
+      state.volProfile = (d.profile || []).map(p => p.vol);
+      state.heatmapLive = !!d.has_volume;
+      for (let c = 0; c < COLS; c++) grid[c] = newColumn();   // reshape to real volume
+      const cl = d.closes || [];
+      if (cl.length > 1) {
+        const lo = d.low, hi = d.high, rng = (hi - lo) || 1;
+        for (let c = 0; c < COLS; c++) {
+          const close = cl[Math.floor(c / COLS * cl.length)];
+          priceLine[c] = Math.max(0.12, Math.min(0.88, 1 - (close - lo) / rng)); // high price near top
+        }
+        $("hm-price").textContent = fmt(cl[cl.length - 1], cl[cl.length - 1] < 10 ? 5 : 2);
+      }
+      drawHeatmap();
+    } catch (_) { state.heatmapLive = false; }
+  }
+
+  // DEX/VEX/CHEX have no per-symbol higher-greek feed yet, so they're illustrative;
+  // reseed deterministically per asset so switching shows a distinct context.
+  function seedGreeksFor(sym) {
+    let h = 0; for (const ch of sym) h = (h * 31 + ch.charCodeAt(0)) % 1000;
+    const r = (n) => +(((h >> n) & 7) / 7 * 1.6 - 0.8).toFixed(2);
+    greekState.dex = r(0); greekState.vex = r(3); greekState.chex = r(6);
+    renderGreeks();
+  }
+
+  // ── Decoupled asset routing: rebind the whole workspace to ONE symbol ──
+  function setActiveSymbol(sym) {
+    if (!sym) return;
+    state.activeSymbol = sym;
+    state.gexLive = false;
+    state.greeksLive = false;
+    state.heatmapLive = false;
+    state.depthLive = false;   // reseed the sim ladder until the new asset's DOM arrives
+    state.volProfile = null;   // drop the previous asset's footprint until the new one loads
+    // Tab visual state
+    document.querySelectorAll("#symbolbar .symtab").forEach(b =>
+      b.classList.toggle("active", b.dataset.sym === sym));
+    // Update validation symbol label
+    if ($("val-symbol-label")) {
+      $("val-symbol-label").textContent = "Active Symbol: " + sym;
+    }
+    // Smooth left-to-right fade-in of the panels (restart the animation)
+    const m = document.querySelector("main");
+    if (m) { m.classList.remove("swapping"); void m.offsetWidth; m.classList.add("swapping"); }
+    // Reset the isolated panels for the new asset
+    if (dpRows) dpRows.innerHTML = "";
+    for (let i = 0; i < 6; i++) addDarkPoolPrint();
+    seedObi();
+    const band = PRICE_BANDS[sym] || [4000, 4600];
+    $("hm-price").textContent = fmt(band[0] + (band[1] - band[0]) / 2, band[0] < 10 ? 5 : 2);
+    seedGreeksFor(sym);     // instant per-asset sim until the real greeks land
+    refreshMomentum();
+    refreshGex(sym);
+    refreshGreeks(sym);     // real DEX/VEX/CHEX from the options chain
+    refreshHeatmap(sym);    // real volume-by-price footprint
+    subscribeSignalRToActiveSymbol();
+    fetchLatestSignalRFeature(sym);
+  }
+
+  /* ============================================================
+     5. GEX regime toggle
+     ============================================================ */
+  function setRegime(positive) {
+    $("regime-name").textContent = positive ? "Positive Gamma" : "Negative Gamma";
+    $("regime-name").style.color = positive ? "var(--neon)" : "var(--neg)";
+    $("regime-desc").textContent = positive
+      ? "Dealers long gamma · vol-suppressive · reverting"
+      : "Dealers short gamma · vol-amplifying · trending";
+    $("pill-pos").classList.toggle("active", positive);
+    $("pill-neg").classList.toggle("active", !positive);
+    const ring = $("regime-ring");
+    ring.querySelectorAll("circle")[1].setAttribute("stroke", positive ? "#2ee6a6" : "#ef5f54");
+    ring.querySelector("path").setAttribute("stroke", positive ? "#2ee6a6" : "#ef5f54");
+  }
+
+  /* ============================================================
+     6. Status chips + countdown
+     ============================================================ */
+  function jitter(id, base, dp, suffix = "") {
+    const v = base + (Math.random() - 0.5) * base * 0.0008;
+    $(id).textContent = fmt(v, dp) + suffix;
+  }
+  let nextMacroTime = null;
+  let simulatedCountdown = 2 * 3600 + 14 * 60 + 29;
+
+  async function fetchForexFactoryNews() {
+    try {
+      const response = await fetch("https://nfs.faireconomy.media/ff_calendar_thisweek.json");
+      if (!response.ok) throw new Error("Calendar fetch failed");
+      const events = await response.json();
+      
+      const now = new Date();
+      const tradedCurrencies = ["USD", "EUR", "GBP", "JPY"];
+      
+      const highImpactEvents = events.filter(e => {
+        if (e.impact !== "High") return false;
+        if (!tradedCurrencies.includes(e.country.toUpperCase())) return false;
+        const eventTime = new Date(e.date);
+        return eventTime > now;
+      });
+      
+      highImpactEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      if (highImpactEvents.length > 0) {
+        const nextEvent = highImpactEvents[0];
+        nextMacroTime = new Date(nextEvent.date);
+        $("macro-title").textContent = `${nextEvent.country} ${nextEvent.title}`;
+      } else {
+        nextMacroTime = null;
+        $("macro-title").textContent = "NO RED FOLDERS";
+      }
+    } catch (err) {
+      console.error("Forex Factory fetch failed, falling back to simulated timer:", err);
+      if (!nextMacroTime) {
+        $("macro-title").textContent = "FOMC Rate Decision";
+        nextMacroTime = new Date(Date.now() + simulatedCountdown * 1000);
+      }
+    }
+  }
+
+  function tickCountdown() {
+    if (!nextMacroTime) {
+      if (simulatedCountdown > 0) {
+        simulatedCountdown--;
+        const h = String(simulatedCountdown / 3600 | 0).padStart(2, "0");
+        const m = String((simulatedCountdown % 3600) / 60 | 0).padStart(2, "0");
+        const s = String(simulatedCountdown % 60).padStart(2, "0");
+        $("countdown").textContent = `${h}:${m}:${s}`;
+      } else {
+        $("countdown").textContent = "00:00:00";
+      }
+      return;
+    }
+    
+    const now = new Date();
+    const diffMs = nextMacroTime - now;
+    if (diffMs <= 0) {
+      $("countdown").textContent = "00:00:00";
+      nextMacroTime = null;
+      fetchForexFactoryNews();
+      return;
+    }
+    
+    const diffSecs = Math.floor(diffMs / 1000);
+    const h = String(diffSecs / 3600 | 0).padStart(2, "0");
+    const m = String((diffSecs % 3600) / 60 | 0).padStart(2, "0");
+    const s = String(diffSecs % 60).padStart(2, "0");
+    $("countdown").textContent = `${h}:${m}:${s}`;
+  }
+
+  /* ============================================================
+     7. Footer optimization controls
+     ============================================================ */
+  let iteration = 1284, piped = 312, lastRunSecs = 21;
+  $("runbtn").addEventListener("click", () => {
+    iteration++; piped += (Math.random() * 12 + 3) | 0; lastRunSecs = 0;
+    $("iteration").textContent = "#" + iteration.toLocaleString();
+    $("piped").textContent = piped;
+    const b = $("runbtn"); b.style.filter = "brightness(1.25)";
+    setTimeout(() => (b.style.filter = ""), 220);
+  });
+  $("exportbtn").addEventListener("click", () => {
+    const snap = { ts: new Date().toISOString(), ...state, greeks: greekState, iteration };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 2)], { type: "application/json" }));
+    a.download = `tbbfx-snapshot-${Date.now()}.json`; a.click();
+  });
+  setInterval(() => { lastRunSecs++; $("lastrun").textContent = lastRunSecs + "s ago"; }, 1000);
+
+  // Timeframe segmented control
+  $("tf-seg").addEventListener("click", (e) => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    [...e.currentTarget.children].forEach(b => b.classList.toggle("active", b === btn));
+  });
+
+  /* ============================================================
+     8. Live data feed (FastAPI WebSocket) with simulator fallback
+     ============================================================ */
+  function setOnline(live, source = "ws") {
+    feedStatus[source] = live;
+    const signalrLive = feedStatus.signalr;
+    const wsLive = feedStatus.ws;
+    const isLive = signalrLive || wsLive;
+    state.connected = isLive;
+    $("online-dot").classList.toggle("sim", !isLive);
+    $("online-state").textContent = signalrLive
+      ? "— LIVE SIGNALR FEED"
+      : wsLive
+        ? "— LIVE WS FEED"
+        : "— SIMULATED FEED";
+  }
+
+  function applyLivePayload(p) {
+    // From core.main broadcast_ticker_metrics: { symbol, cvd, microprice, obi, footprints }
+    // Decoupled routing: ONLY the active asset's stream drives the panels. The
+    // WS carries all 6 symbols; we filter client-side to isolate the active one.
+    if (p.symbol && p.symbol.toUpperCase() !== state.activeSymbol) return;
+    // REAL broker DOM ladder (L1-L5) when the broker provides depth — this
+    // replaces the simulated ladder entirely.
+    if (p.depth && Array.isArray(p.depth.bids) && p.depth.bids.length &&
+        Array.isArray(p.depth.asks) && p.depth.asks.length) {
+      state.depthLive = true;
+      const bids = p.depth.bids, asks = p.depth.asks;
+      for (let i = 0; i < OBI_LEVELS; i++) {
+        const b = bids[i], a = asks[i];
+        obiData[i] = {
+          bid: b ? b.volume : 0,
+          ask: a ? a.volume : 0,
+          spread: (b && a) ? Math.abs(a.price - b.price) : (obiData[i] ? obiData[i].spread : 0.3)
+        };
+      }
+      renderObi();
+    }
+    if (typeof p.obi === "number") {
+      state.obi = p.obi;
+      // Only nudge the simulated L1 when there is NO real DOM ladder.
+      if (!state.depthLive && obiData.length) {
+        const tilt = (p.obi + 1) / 2;
+        obiData[0].bid = 80 + tilt * 600;
+        obiData[0].ask = 80 + (1 - tilt) * 600;
+        renderObi();
+      }
+    }
+    if (typeof p.cvd === "number") {
+      state.cvd = p.cvd;
+      $("hm-delta").textContent = (p.cvd >= 0 ? "+" : "") + (Math.abs(p.cvd) >= 1000 ? (p.cvd / 1000).toFixed(1) + "K" : p.cvd.toFixed(0));
+      $("hm-delta").style.color = p.cvd >= 0 ? "var(--pos)" : "var(--neg)";
+    }
+    if (typeof p.microprice === "number" && p.microprice > 0) {
+      $("hm-price").textContent = fmt(p.microprice, p.microprice < 10 ? 5 : 2);
+    }
+  }
+
+  function numericValue(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  }
+
+  function normaliseFeaturePayload(p) {
+    if (!p) return null;
+    const symbol = (p.symbol ?? p.Symbol ?? "").toString().toUpperCase();
+    if (!symbol) return null;
+
+    const microprice = numericValue(p.microprice ?? p.Microprice ?? p.price ?? p.Price);
+    return {
+      symbol,
+      cvd: numericValue(p.cvd ?? p.Cvd ?? p.cumulativeDelta ?? p.CumulativeDelta),
+      obi: numericValue(p.obi ?? p.Obi),
+      microprice,
+      price: numericValue(p.price ?? p.Price ?? microprice),
+      net_gex: numericValue(p.net_gex ?? p.netGex ?? p.NetGex),
+      gamma_flip: numericValue(p.gamma_flip ?? p.gammaFlip ?? p.GammaFlip),
+      timestamp: p.timestamp ?? p.Timestamp
+    };
+  }
+
+  function receiveSignalRPulse(payload) {
+    const p = normaliseFeaturePayload(payload);
+    if (!p) return;
+    setOnline(true, "signalr");
+    applyLivePayload(p);
+  }
+
+  async function fetchLatestSignalRFeature(sym = state.activeSymbol) {
+    try {
+      const r = await fetch(`${CONFIG.VALIDATION_API_BASE}/features/latest/${sym}`, { cache: "no-store" });
+      if (!r.ok) return;
+      receiveSignalRPulse(await r.json());
+    } catch (_) {
+      // Push events still keep the terminal fresh if the cache read is unavailable.
+    }
+  }
+
+  async function subscribeSignalRToActiveSymbol() {
+    if (!signalrConn || signalrConn.state !== "Connected") return;
+    const sym = state.activeSymbol;
+    if (CONFIG.SIGNALR_MODE === "azure-signalr-serverless") {
+      signalrSubscribedSymbol = sym;
+      fetchLatestSignalRFeature(sym);
+      return;
+    }
+
+    try {
+      if (signalrSubscribedSymbol && signalrSubscribedSymbol !== sym) {
+        await signalrConn.invoke("LeaveSymbolGroup", signalrSubscribedSymbol);
+      }
+      await signalrConn.invoke("JoinSymbolGroup", sym);
+      signalrSubscribedSymbol = sym;
+      fetchLatestSignalRFeature(sym);
+    } catch (err) {
+      console.warn("[SignalR] Symbol subscription failed:", err);
+    }
+  }
+
+  function connect() {
+    if (!CONFIG.WS_URL) {
+      setOnline(false, "public-readonly");
+      return;
+    }
+
+    let ws;
+    try { ws = new WebSocket(CONFIG.WS_URL); }
+    catch (e) { setOnline(false); return; }
+
+    const giveUp = setTimeout(() => { if (ws.readyState !== 1) { try { ws.close(); } catch (_) {} setOnline(false, "ws"); } }, 2500);
+
+    ws.onopen = () => { clearTimeout(giveUp); setOnline(true, "ws"); try { ws.send("hello"); } catch (_) {} };
+    ws.onmessage = (ev) => {
+      try { const p = JSON.parse(ev.data); if (p && p.type !== "pong") applyLivePayload(p); } catch (_) {}
+    };
+    ws.onerror = () => { setOnline(false, "ws"); };
+    ws.onclose = () => { setOnline(false, "ws"); setTimeout(connect, 4000); }; // auto-retry
+  }
+
+  /* ============================================================
+     8b. QUANTITATIVE VALIDATION CONTROLLER
+     ============================================================ */
+  function connectSignalR() {
+    if (!CONFIG.SIGNALR_URL) {
+      setOnline(false, "public-readonly");
+      return;
+    }
+
+    try {
+      signalrConn = new signalR.HubConnectionBuilder()
+        .withUrl(CONFIG.SIGNALR_URL)
+        .withAutomaticReconnect()
+        .build();
+
+      signalrConn.on("PulseWelcome", (data) => {
+        console.log("[SignalR] Welcomed:", data.message);
+        setOnline(true, "signalr");
+      });
+
+      signalrConn.on("ReceivePulse", receiveSignalRPulse);
+      signalrConn.on("ReceiveAnyPulse", receiveSignalRPulse);
+      signalrConn.on("ReceiveFeatureUpdate", receiveSignalRPulse);
+      signalrConn.on("ReceiveAnyUpdate", receiveSignalRPulse);
+      signalrConn.on("ReceiveVolumeDelta", (d) => {
+        receiveSignalRPulse({
+          symbol: d.symbol ?? d.Symbol,
+          cvd: d.cumulativeDelta ?? d.CumulativeDelta,
+          timestamp: d.timestamp ?? d.Timestamp
+        });
+      });
+      signalrConn.on("ReceiveObiUpdate", (d) => {
+        receiveSignalRPulse({
+          symbol: d.symbol ?? d.Symbol,
+          obi: d.obi ?? d.Obi,
+          timestamp: d.timestamp ?? d.Timestamp
+        });
+      });
+
+      signalrConn.onreconnecting(() => setOnline(false, "signalr"));
+      signalrConn.onreconnected(() => {
+        setOnline(true, "signalr");
+        subscribeSignalRToActiveSymbol();
+      });
+      signalrConn.onclose(() => {
+        setOnline(false, "signalr");
+        setTimeout(connectSignalR, 5000);
+      });
+
+      signalrConn.on("ReceiveValidationProgress", (p) => {
+        const bar = $("val-progress-bar");
+        const pctText = $("val-progress-pct");
+        const text = $("val-progress-text");
+        const msg = $("val-status-msg");
+
+        bar.style.width = p.pct + "%";
+        pctText.textContent = p.pct.toFixed(1) + "%";
+        text.textContent = `Pillar: ${p.step} (${p.current}/${p.total})`;
+        if (p.pct === 100) {
+          msg.textContent = "SYSTEM STATE: Validation Complete. Expectancy analysis rendered.";
+        } else {
+          msg.textContent = `[${p.step}] ${p.message}`;
+        }
+      });
+
+      signalrConn.on("ReceiveValidationResult", (res) => {
+        const btn = $("val-run-btn");
+        btn.disabled = false;
+        btn.style.opacity = "1";
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:16px;height:16px;margin-right:6px;vertical-align:middle;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg> Run 4-Step Validation Suite`;
+
+        if (res.error) {
+          $("val-status-msg").textContent = "ERROR: " + res.error;
+          return;
+        }
+
+        const firstOos = res.wfResult && res.wfResult.aggregateOosEquity && res.wfResult.aggregateOosEquity[0] ? JSON.stringify(res.wfResult.aggregateOosEquity[0]) : 'none';
+        const firstPath = res.mcResults && res.mcResults[0] && res.mcResults[0].simulatedPaths && res.mcResults[0].simulatedPaths[0] ? typeof res.mcResults[0].simulatedPaths[0] + ' len ' + res.mcResults[0].simulatedPaths[0].length : 'none';
+        const firstScatter = res.clusterResult && res.clusterResult.scatterPoints && res.clusterResult.scatterPoints[0] ? JSON.stringify(res.clusterResult.scatterPoints[0]) : 'none';
+
+        const keysInfo = `res: ${Object.keys(res).join(',')}; firstOos: ${firstOos}; firstPath: ${firstPath}; firstScatter: ${firstScatter}`;
+        console.log("DEBUG KEYS NESTED:", keysInfo);
+        $("val-status-msg").textContent = "SYSTEM STATE: Validation Complete. Expectancy analysis rendered.";
+
+        renderValidationSuite(res);
+      });
+
+      signalrConn.start()
+        .then(() => {
+          console.log("[SignalR] Connected successfully.");
+          setOnline(true, "signalr");
+          subscribeSignalRToActiveSymbol();
+        })
+        .catch(err => {
+          console.error("[SignalR] Connection failed:", err);
+          setOnline(false, "signalr");
+          setTimeout(connectSignalR, 5000);
+        });
+    } catch (e) {
+      console.error("[SignalR] Setup error:", e);
+    }
+  }
+
+  function drawStabilityHeatmap(heatmap) {
+    const canvas = $("val-heatmap-canvas");
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    function viridis(v) {
+      const stops = [
+        [68, 1, 84],     // deep purple
+        [59, 82, 139],   // blue
+        [33, 145, 140],  // teal/cyan
+        [94, 201, 98],   // light green
+        [253, 231, 37]   // bright yellow
+      ];
+      const x = Math.max(0, Math.min(0.999, v)) * (stops.length - 1);
+      const i = Math.floor(x), f = x - i;
+      const a = stops[i], b = stops[i + 1] || stops[i];
+      return `rgb(${a[0]+(b[0]-a[0])*f|0},${a[1]+(b[1]-a[1])*f|0},${a[2]+(b[2]-a[2])*f|0})`;
+    }
+
+    const zNorm = heatmap.zNorm;
+    const zRaw = heatmap.z;
+    const xs = heatmap.xValues;
+    const ys = heatmap.yValues;
+    const rows = ys.length;
+    const cols = xs.length;
+
+    const leftMargin = 45;
+    const rightMargin = 15;
+    const topMargin = 15;
+    const bottomMargin = 25;
+
+    const cellW = (w - leftMargin - rightMargin) / cols;
+    const cellH = (h - topMargin - bottomMargin) / rows;
+
+    let maxVal = -1;
+    let optR = 0;
+    let optC = 0;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const val = zNorm[r][c];
+        const rawVal = zRaw[r][c];
+        if (rawVal > maxVal) {
+          maxVal = rawVal;
+          optR = r;
+          optC = c;
+        }
+        ctx.fillStyle = viridis(val);
+        const xPos = leftMargin + c * cellW;
+        const yPos = topMargin + (rows - 1 - r) * cellH;
+        ctx.fillRect(xPos, yPos, cellW - 1, cellH - 1);
+      }
+    }
+
+    ctx.strokeStyle = "rgba(46, 230, 166, 0.2)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(leftMargin, topMargin);
+    ctx.lineTo(leftMargin, h - bottomMargin);
+    ctx.lineTo(w - rightMargin, h - bottomMargin);
+    ctx.stroke();
+
+    ctx.fillStyle = "#aebfb8";
+    ctx.font = "9px ui-monospace, monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    for (let r = 0; r < rows; r++) {
+      const yVal = ys[r].toFixed(2);
+      const yPos = topMargin + (rows - 1 - r) * cellH + cellH / 2;
+      ctx.fillText(yVal, leftMargin - 6, yPos);
+      ctx.beginPath();
+      ctx.moveTo(leftMargin - 4, topMargin + (rows - 1 - r) * cellH + cellH / 2);
+      ctx.lineTo(leftMargin, topMargin + (rows - 1 - r) * cellH + cellH / 2);
+      ctx.stroke();
+    }
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (let c = 0; c < cols; c++) {
+      const xVal = xs[c].toString();
+      const xPos = leftMargin + c * cellW + cellW / 2;
+      ctx.fillText(xVal, xPos, h - bottomMargin + 6);
+      ctx.beginPath();
+      ctx.moveTo(xPos, h - bottomMargin);
+      ctx.lineTo(xPos, h - bottomMargin + 4);
+      ctx.stroke();
+    }
+
+    if (cols > 0 && rows > 0) {
+      const xCenter = leftMargin + optC * cellW + cellW / 2;
+      const yCenter = topMargin + (rows - 1 - optR) * cellH + cellH / 2;
+
+      ctx.strokeStyle = "#f3b13f";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(xCenter - 5, yCenter - 5);
+      ctx.lineTo(xCenter + 5, yCenter + 5);
+      ctx.moveTo(xCenter + 5, yCenter - 5);
+      ctx.lineTo(xCenter - 5, yCenter + 5);
+      ctx.stroke();
+
+      let neighborSum = 0;
+      let neighborCount = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = optR + dr;
+          const nc = optC + dc;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            neighborSum += zRaw[nr][nc];
+            neighborCount++;
+          }
+        }
+      }
+      const avgNeighbor = neighborCount > 0 ? (neighborSum / neighborCount) : 0;
+      const isPlateau = maxVal > 0 && (avgNeighbor / maxVal) >= 0.75;
+      const labelText = isPlateau ? "Many nearby settings work" : "Optimized setting";
+
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.fillStyle = "rgba(11, 26, 22, 0.9)";
+      ctx.strokeStyle = "#f3b13f";
+      ctx.lineWidth = 1;
+      
+      const textW = ctx.measureText(labelText).width + 12;
+      const textH = 16;
+      
+      let boxX = xCenter + 10;
+      let boxY = yCenter - 25;
+      if (boxX + textW > w) {
+        boxX = xCenter - textW - 10;
+      }
+      if (boxY < topMargin) {
+        boxY = yCenter + 10;
+      }
+
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, textW, textH, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = "#f3b13f";
+      ctx.font = "bold 8px var(--sans)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(labelText, boxX + textW / 2, boxY + textH / 2);
+    }
+
+    $("val-heatmap-y-label").textContent = `Y: ATR Multiplier (${ys[0].toFixed(2)} to ${ys[ys.length-1].toFixed(2)})`;
+    $("val-heatmap-x-label").textContent = `X: Moving Average Length (${xs[0]} to ${xs[xs.length-1]})`;
+  }
+
+  function renderValidationSuite(res) {
+    try {
+      $("val-heatmap-no-data").style.display = "none";
+      $("val-heatmap-container").style.display = "flex";
+      $("val-mc-no-data").style.display = "none";
+      $("val-mc-container").style.display = "flex";
+    $("val-cluster-no-data").style.display = "none";
+    $("val-cluster-container").style.display = "flex";
+    $("val-wf-no-data").style.display = "none";
+    $("val-wf-container").style.display = "flex";
+
+    drawStabilityHeatmap(res.sweepResult.heatmap);
+
+    const mcResults = res.mcResults || [];
+    const wf = res.wfResult;
+
+    function makeKey(p) {
+      if (!p) return "";
+      const fmtDouble = (v) => {
+        if (typeof v !== 'number') return "0";
+        return Number(v.toFixed(3)).toString();
+      };
+      return `c${p.minConfluence || 2}_cd${p.tradeCooldownBars || 150}_e${p.emaFastPeriod || 8}-${p.emaMidPeriod || 21}-${p.emaSlowPeriod || 150}` +
+             `_atr${p.atrPeriod || 14}_sl${fmtDouble(p.slAtrMultiplier || 3.0)}_r${fmtDouble(p.targetR || 3.0)}` +
+             `_am${fmtDouble(p.atrMinMultiplier || 1.0)}_fm${fmtDouble(p.fvgMinMultiplier || 1.0)}`;
+    }
+
+    const recommendedKey = wf && wf.recommendedParameters ? makeKey(wf.recommendedParameters) : "";
+    let bestMc = null;
+    if (recommendedKey) {
+      bestMc = mcResults.find(r => r.parameterKey === recommendedKey);
+    }
+    if (!bestMc && mcResults.length > 0) {
+      bestMc = mcResults[0];
+    }
+
+    let mcDatasets = [];
+    let mcLabels = [];
+    if (bestMc && bestMc.simulatedPaths && bestMc.simulatedPaths.length > 0) {
+      mcDatasets = bestMc.simulatedPaths.map((path, idx) => {
+        const finalBal = path[path.length - 1];
+        const startingBal = path.length > 0 ? path[0] : 3000;
+        const isProfitable = finalBal >= startingBal;
+        const color = isProfitable ? "rgba(46, 230, 166, 0.35)" : "rgba(239, 95, 84, 0.35)";
+        return {
+          label: `Path ${idx + 1}`,
+          data: path,
+          borderColor: color,
+          borderWidth: 1.2,
+          fill: false,
+          pointRadius: 0,
+          tension: 0.1
+        };
+      });
+      const maxLen = Math.max(...bestMc.simulatedPaths.map(p => p.length));
+      mcLabels = Array.from({ length: maxLen }, (_, i) => i);
+    }
+
+    console.log("val-mc-chart dimensions before:", $("val-mc-chart").clientWidth, $("val-mc-chart").clientHeight);
+    if (mcChartInstance) mcChartInstance.destroy();
+    mcChartInstance = new Chart($("val-mc-chart"), {
+      type: "line",
+      data: {
+        labels: mcLabels,
+        datasets: mcDatasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { grid: { color: "rgba(46,230,166,0.06)" }, ticks: { color: "#aebfb8", font: { family: "ui-monospace" } } },
+          x: { title: { display: true, text: "Trade Sequence", color: "#aebfb8" }, grid: { color: "transparent" }, ticks: { color: "#aebfb8", font: { size: 9 } } }
+        },
+        plugins: {
+          legend: {
+            display: true,
+            labels: {
+              color: "#ffffff",
+              font: { size: 9 },
+              generateLabels: function(chart) {
+                return [
+                  { text: 'Profitable Path', fillStyle: '#2ee6a6', strokeStyle: '#2ee6a6', lineWidth: 2, datasetIndex: 0, fontColor: '#ffffff' },
+                  { text: 'Unprofitable Path', fillStyle: '#ef5f54', strokeStyle: '#ef5f54', lineWidth: 2, datasetIndex: 1, fontColor: '#ffffff' }
+                ];
+              }
+            }
+          }
+        }
+      }
+    });
+    console.log("val-mc-chart dimensions after:", $("val-mc-chart").width, $("val-mc-chart").height);
+
+    if (bestMc) {
+      const riskOfRuin = bestMc.riskOfRuin;
+      const survives = bestMc.structurallySurvives;
+      const maxDd = bestMc.medianMaxDrawdownPercent;
+
+      $("val-mc-ruin").textContent = (riskOfRuin * 100).toFixed(1) + "%";
+      $("val-mc-ruin").style.color = riskOfRuin > 0.05 ? "var(--neg)" : "var(--neon)";
+      
+      $("val-mc-survival").textContent = survives ? "SURVIVES" : "RUINED";
+      $("val-mc-survival").style.color = survives ? "var(--neon)" : "var(--neg)";
+
+      $("val-mc-dd").textContent = maxDd.toFixed(1) + "%";
+    }
+
+    const scatterPoints = res.clusterResult.scatterPoints || [];
+    const outlierKeys = res.clusterResult.outlierKeys || [];
+    const clusters = res.clusterResult.clusters || [];
+    const clusterColors = ["#2ee6a6", "#3b82f6", "#ec4899"];
+
+    const rawX = scatterPoints.map(p => p[0]);
+    const rawY = scatterPoints.map(p => p[1]);
+    const minX = rawX.length > 0 ? Math.min(...rawX) : 0;
+    const maxX = rawX.length > 0 ? Math.max(...rawX) : 1;
+    const minY = rawY.length > 0 ? Math.min(...rawY) : 0;
+    const maxY = rawY.length > 0 ? Math.max(...rawY) : 1;
+
+    const spanX = (maxX - minX) !== 0 ? (maxX - minX) : 1;
+    const spanY = (maxY - minY) !== 0 ? (maxY - minY) : 1;
+
+    const normPoints = scatterPoints.map(p => [
+      (p[0] - minX) / spanX,
+      (p[1] - minY) / spanY,
+      p[2]
+    ]);
+
+    if (clusterChartInstance) clusterChartInstance.destroy();
+    
+    const datasets = clusters.map(c => {
+      const pts = normPoints.filter(p => p[2] === c.clusterId).map(p => ({ x: p[0], y: p[1] }));
+      return {
+        label: c.label,
+        data: pts,
+        backgroundColor: clusterColors[c.clusterId] || "#999",
+        pointRadius: 5,
+        pointHoverRadius: 7
+      };
+    });
+
+    const outlierPoints = [];
+    res.sweepResult.results.forEach((r, idx) => {
+      if (outlierKeys.includes(r.key)) {
+        const pt = normPoints[idx];
+        if (pt) outlierPoints.push({ x: pt[0], y: pt[1] });
+      }
+    });
+
+    if (outlierPoints.length > 0) {
+      datasets.push({
+        label: "Flagged Outliers",
+        data: outlierPoints,
+        backgroundColor: "transparent",
+        borderColor: "#94a3b8",
+        borderWidth: 2,
+        pointStyle: "triangle",
+        pointRadius: 8,
+        pointHoverRadius: 10
+      });
+    }
+
+    clusterChartInstance = new Chart($("val-cluster-chart"), {
+      type: "scatter",
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { 
+            title: { display: true, text: "Normalized -MaxDrawdown", color: "#aebfb8" }, 
+            grid: { color: "rgba(46,230,166,0.06)" }, 
+            ticks: { color: "#aebfb8" },
+            min: 0.0,
+            max: 1.0
+          },
+          x: { 
+            title: { display: true, text: "Normalized Sharpe Ratio", color: "#aebfb8" }, 
+            grid: { color: "rgba(46,230,166,0.06)" }, 
+            ticks: { color: "#aebfb8" },
+            min: 0.0,
+            max: 1.0
+          }
+        },
+        plugins: {
+          legend: { labels: { color: "#e9f4f0", font: { size: 9 } } }
+        }
+      }
+    });
+
+    const legendEl = $("val-cluster-legend");
+    legendEl.innerHTML = clusters.map(c => `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:${clusterColors[c.clusterId] || "#999"}; margin-right:6px;"></span><b>Cluster ${c.clusterId}:</b> ${c.label} (${c.memberKeys.length} sets)</span>
+        <span class="num">Sharpe: ${c.avgSharpe.toFixed(2)} | DD: ${c.avgMaxDrawdownPercent.toFixed(1)}%</span>
+      </div>
+    `).join("") + (outlierKeys.length > 0 ? `<div style="margin-top:4px;color:#94a3b8;"><b>Flagged Outliers:</b> ${outlierKeys.length} configurations fail cohesion.</div>` : "");
+
+    const oosEquity = res.wfResult.aggregateOosEquity || [];
+    if (wfChartInstance) wfChartInstance.destroy();
+    
+    wfChartInstance = new Chart($("val-wf-chart"), {
+      type: "line",
+      data: {
+        labels: oosEquity.map((_, idx) => `Trade ${idx+1}`),
+        datasets: [{
+          label: "Aggregate Out-of-Sample Equity",
+          data: oosEquity.map(pt => pt.balance),
+          borderColor: "#59d6e8",
+          backgroundColor: "rgba(89,214,232,0.06)",
+          fill: true,
+          borderWidth: 2,
+          pointRadius: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { grid: { color: "rgba(46,230,166,0.06)" }, ticks: { color: "#aebfb8" } },
+          x: { grid: { color: "transparent" }, ticks: { display: false } }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+
+    $("val-wf-report-text").innerHTML = `
+      <b>Recommended Config:</b> ${wf.recommendedParameters ? `Target R = ${wf.recommendedParameters.targetR.toFixed(2)}, SL ATR Multi = ${wf.recommendedParameters.slAtrMultiplier.toFixed(2)}` : 'None (No robust configuration met win rate constraint)'}<br/>
+      <b>Out-of-Sample Stats:</b> Net Profit = R ${fmt(wf.oosNetProfit)}, Profit Factor = ${fmt(wf.oosProfitFactor)}, Expectancy = R ${fmt(wf.oosExpectancy)}/trade, Max DD = ${fmt(wf.oosMaxDrawdownPercent)}%, WR = ${fmt(wf.oosWinRate)}%<br/>
+      <b>Strict Gate:</b> Monte Carlo survives = ${wf.monteCarloSurvives === true ? 'YES' : 'NO'}, Stability plateau cells = ${wf.stabilityPlateauCount ?? 0}/3<br/>
+      <b>Rationale:</b> ${wf.approvalRationale}
+    `;
+
+    const badge = $("val-wf-status-badge");
+    if (wf.productionApproved) {
+      badge.textContent = "PRODUCTION APPROVED";
+      badge.style.color = "var(--pos)";
+      badge.style.borderColor = "var(--pos)";
+      badge.style.background = "rgba(52,217,154,0.08)";
+    } else {
+      badge.textContent = "REJECTED";
+      badge.style.color = "var(--neg)";
+      badge.style.borderColor = "var(--neg)";
+      badge.style.background = "rgba(239,95,84,0.08)";
+    }
+    } catch (err) {
+      console.error("renderValidationSuite error:", err);
+      $("val-status-msg").textContent = "JS ERROR: " + err.message + " @ " + err.stack;
+    }
+  }
+
+  async function runValidation(symbol) {
+    const btn = $("val-run-btn");
+    if (!CONFIG.ALLOW_VALIDATION || !CONFIG.VALIDATION_API_BASE) {
+      $("val-status-msg").textContent = "PUBLIC MODE: Validation compute is private and disabled on the hosted terminal.";
+      $("val-progress-text").textContent = "Read-only deployment: no backend validation job was started.";
+      $("val-progress-pct").textContent = "0.0%";
+      return;
+    }
+
+    btn.disabled = true;
+    btn.style.opacity = "0.5";
+    btn.innerHTML = `<span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fff;margin-right:6px;animation:pulse 1.2s infinite;"></span> Running Sweep...`;
+
+    // Reset progress UI
+    $("val-progress-bar").style.width = "0%";
+    $("val-progress-pct").textContent = "0.0%";
+    $("val-progress-text").textContent = "Triggering backend validation...";
+    $("val-status-msg").textContent = `Triggering validation for ${symbol} via SignalR server...`;
+
+    try {
+      const response = await fetch(`${CONFIG.VALIDATION_API_BASE}/api/validation/run/${symbol}`, {
+        method: "POST"
+      });
+      const data = await response.json();
+      $("val-status-msg").textContent = `[Setup] ${data.message}`;
+    } catch (err) {
+      $("val-status-msg").textContent = "ERROR: Failed to connect to C# validation server. Make sure SignalRFeatureStore is running on port 5000.";
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:16px;height:16px;margin-right:6px;vertical-align:middle;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg> Run 4-Step Validation Suite`;
+    }
+  }
+
+  /* ============================================================
+     9. Boot
+     ============================================================ */
+  function boot() {
+    resizeCanvas(); seedGrid(); drawHeatmap();
+    seedObi(); renderGreeks(); setRegime(true);
+    renderMomentum(57, "NEUTRAL");
+
+    // Wire the symbol command bar → decoupled per-asset routing.
+    const bar = $("symbolbar");
+    if (bar) bar.addEventListener("click", (e) => {
+      if (e.target.closest("#view-seg") || e.target.closest(".barlabel")) return;
+      const btn = e.target.closest(".symtab");
+      if (btn && btn.dataset.sym) setActiveSymbol(btn.dataset.sym);
+    });
+
+    // Wire the Mode switcher
+    const viewSeg = $("view-seg");
+    if (viewSeg) viewSeg.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      const view = btn.dataset.view;
+      if (view === "orderflow") {
+        const orderflowUrl = window.location.protocol.startsWith("http")
+          ? `${window.location.origin}/orderflow`
+          : "./orderflow.html";
+        window.location.href = orderflowUrl;
+        return;
+      }
+      [...viewSeg.children].forEach(b => b.classList.toggle("active", b === btn));
+      state.activeView = view;
+      if (view === "live") {
+        $("live-view-container").style.display = "block";
+        $("validation-view-container").style.display = "none";
+      } else {
+        $("live-view-container").style.display = "none";
+        $("validation-view-container").style.display = "flex";
+        $("val-symbol-label").textContent = "Active Symbol: " + state.activeSymbol;
+      }
+    });
+
+    // Wire the Validation trigger button
+    const valRunBtn = $("val-run-btn");
+    if (valRunBtn) {
+      if (!CONFIG.ALLOW_VALIDATION) {
+        valRunBtn.disabled = true;
+        valRunBtn.style.opacity = "0.55";
+        valRunBtn.title = "Validation is disabled on public Azure Static Web Apps builds.";
+      }
+      valRunBtn.addEventListener("click", () => {
+        runValidation(state.activeSymbol);
+      });
+    }
+
+    setInterval(stepHeatmap, 750);
+    setInterval(() => { if (!state.connected) stepObi(); }, 900);
+    setInterval(stepGreeks, 1600);
+    setInterval(refreshMomentum, 2500);
+    // Slow refresh of the per-symbol options analytics (gentle on the free feed).
+    setInterval(() => {
+      const s = state.activeSymbol;
+      refreshGex(s); refreshGreeks(s); refreshHeatmap(s);
+    }, 60000);
+    setInterval(addDarkPoolPrint, 1700);
+    setInterval(tickCountdown, 1000);
+    setInterval(() => {
+      jitter("dxy", 103.42, 2); jitter("vix", 13.96, 2);
+      jitter("esfut", 5291.5, 1);   // US10Y is real (refreshMacro), so not jittered
+    }, 2000);
+    // Random regime flips ONLY when there's no live GEX for the active asset.
+    setInterval(() => { if (!state.connected && !state.gexLive) setRegime(Math.random() > 0.25); }, 9000);
+
+    setActiveSymbol("XAUUSD"); // default isolated asset (seeds panels + fetches)
+    refreshMacro(); setInterval(refreshMacro, 60000);
+    fetchForexFactoryNews(); setInterval(fetchForexFactoryNews, 300000);
+    setOnline(false);
+    connect();
+    connectSignalR();
+  }
+
+  window.addEventListener("resize", () => { resizeCanvas(); drawHeatmap(); });
+  document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", boot) : boot();
+})();
+</script>
+</body>
+</html>

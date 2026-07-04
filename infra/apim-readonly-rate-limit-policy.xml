@@ -1,0 +1,43 @@
+<policies>
+  <inbound>
+    <base />
+    <cors allow-credentials="false">
+      <allowed-origins>
+        <origin>https://YOUR_PUBLIC_TBBFX_DOMAIN</origin>
+      </allowed-origins>
+      <allowed-methods>
+        <method>GET</method>
+        <method>POST</method>
+        <method>OPTIONS</method>
+      </allowed-methods>
+      <allowed-headers>
+        <header>content-type</header>
+        <header>x-functions-key</header>
+      </allowed-headers>
+    </cors>
+    <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
+    <quota-by-key calls="5000" renewal-period="86400" counter-key="@(context.Request.IpAddress)" />
+    <choose>
+      <when condition="@(context.Request.Url.Path.Contains(&quot;/api/validation/&quot;) || context.Request.Url.Path.Contains(&quot;/api/live-scanner/&quot;) || context.Request.Url.Path.Contains(&quot;/features/update&quot;) || context.Request.Url.Path.Contains(&quot;/features/all&quot;) || context.Request.Url.Path.Contains(&quot;/hub/&quot;))">
+        <return-response>
+          <set-status code="404" reason="Not Found" />
+        </return-response>
+      </when>
+    </choose>
+    <set-header name="X-Content-Type-Options" exists-action="override">
+      <value>nosniff</value>
+    </set-header>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <set-header name="Cache-Control" exists-action="skip">
+      <value>no-store</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

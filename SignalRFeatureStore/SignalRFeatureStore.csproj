@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BuildInParallel>false</BuildInParallel>
+    <UseSharedCompilation>false</UseSharedCompilation>
+    <MSBuildNodeReuse>false</MSBuildNodeReuse>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\TBBFX_Solution\TBBFX.Engine\TBBFX.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Suppressed here to mirror the main TBBFX solution audit policy for the pinned native SQLite runtime. -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
+  </ItemGroup>
+
+  <!-- Pre-build target to automatically release file lock on rebuild -->
+  <Target Name="KillRunningProcess" BeforeTargets="PreBuildEvent" Condition="'$(CI)' != 'true' and '$(DisableLocalProcessKill)' != 'true'">
+    <Exec Command="taskkill /f /im SignalRFeatureStore.exe 2&gt;nul || exit 0" IgnoreExitCode="true" />
+  </Target>
+
+</Project>

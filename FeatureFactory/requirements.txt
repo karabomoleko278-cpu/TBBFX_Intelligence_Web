@@ -1,0 +1,21 @@
+# TBBFX Centralized Feature Factory — Python dependencies
+# All core data is sourced from FREE, keyless APIs (yfinance / Yahoo Finance).
+
+fastapi
+uvicorn[standard]
+numpy
+scipy
+yfinance
+pandas
+pydantic
+requests
+pytest
+
+# Optional — enables the Bytewax streaming-dataflow runtime for the feature
+# pipeline. Without it, core/feature_pipeline.py runs an asyncio fallback that
+# does the same streaming, so the system works before this is installed.
+bytewax
+
+# Optional — Windows-only live tick source. The StreamProcessor automatically
+# falls back to a built-in simulator when MetaTrader5 is not present.
+# MetaTrader5
