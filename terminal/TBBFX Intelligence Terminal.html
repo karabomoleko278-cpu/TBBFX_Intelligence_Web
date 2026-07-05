@@ -1960,7 +1960,7 @@
       const view = btn.dataset.view;
       if (view === "orderflow") {
         const orderflowUrl = window.location.protocol.startsWith("http")
-          ? `${window.location.origin}/orderflow.html${window.location.search}`
+          ? `${window.location.origin}/orderflow/${window.location.search}`
           : "./orderflow.html";
         window.location.href = orderflowUrl;
         return;

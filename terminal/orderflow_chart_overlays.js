@@ -210,8 +210,11 @@
       b.addEventListener("click", function () {
         var label = (b.textContent || "").toLowerCase();
         var query = window.location.search || "";
-        if (label.indexOf("live") >= 0) window.location.href = "./TBBFX%20Intelligence%20Terminal.html" + query;
-        if (label.indexOf("validation") >= 0) window.location.href = "./TBBFX%20Intelligence%20Terminal.html" + query + "#validation";
+        var terminalBase = window.location.protocol.indexOf("http") === 0
+          ? window.location.origin + "/TBBFX%20Intelligence%20Terminal"
+          : "./TBBFX%20Intelligence%20Terminal.html";
+        if (label.indexOf("live") >= 0) window.location.href = terminalBase + query;
+        if (label.indexOf("validation") >= 0) window.location.href = terminalBase + query + "#validation";
       });
     });
   }
