@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "func start"
   },
   "dependencies": {
-    "@azure/functions": "^4.6.0"
+    "@azure/functions": "4.16.1"
   }
 }

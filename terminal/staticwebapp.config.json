@@ -65,5 +65,8 @@
   "mimeTypes": {
     ".js": "application/javascript",
     ".json": "application/json"
+  },
+  "platform": {
+    "apiRuntime": "node:20"
   }
 }
