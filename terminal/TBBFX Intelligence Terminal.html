@@ -1222,13 +1222,17 @@
     const signalrLive = feedStatus.signalr;
     const wsLive = feedStatus.ws;
     const isLive = signalrLive || wsLive;
+    const publicReadOnly = CONFIG.PUBLIC_MODE || source === "public-readonly";
+    const publicStatusLabel = PUBLIC_CONFIG.statusLabel || "PUBLIC READ-ONLY";
     state.connected = isLive;
     $("online-dot").classList.toggle("sim", !isLive);
     $("online-state").textContent = signalrLive
-      ? "— LIVE SIGNALR FEED"
+      ? "- LIVE SIGNALR FEED"
       : wsLive
-        ? "— LIVE WS FEED"
-        : "— SIMULATED FEED";
+        ? "- LIVE WS FEED"
+        : publicReadOnly
+          ? `- ${publicStatusLabel}`
+          : "- SIMULATED FEED";
   }
 
   function applyLivePayload(p) {
@@ -1922,7 +1926,7 @@
       const view = btn.dataset.view;
       if (view === "orderflow") {
         const orderflowUrl = window.location.protocol.startsWith("http")
-          ? `${window.location.origin}/orderflow`
+          ? `${window.location.origin}/orderflow.html`
           : "./orderflow.html";
         window.location.href = orderflowUrl;
         return;
@@ -1973,7 +1977,7 @@
     setActiveSymbol("XAUUSD"); // default isolated asset (seeds panels + fetches)
     refreshMacro(); setInterval(refreshMacro, 60000);
     fetchForexFactoryNews(); setInterval(fetchForexFactoryNews, 300000);
-    setOnline(false);
+    setOnline(false, CONFIG.PUBLIC_MODE ? "public-readonly" : "ws");
     connect();
     connectSignalR();
   }
