@@ -539,7 +539,7 @@
   </div>
 
   <!-- ===================== QUANTITATIVE VALIDATION BOARD ===================== -->
-  <div id="validation-view-container" style="display: none; padding: var(--gap); min-height: calc(100vh - 180px); display: flex; flex-direction: column; gap: var(--gap);">
+  <div id="validation-view-container" style="display: none; padding: var(--gap); min-height: calc(100vh - 180px); flex-direction: column; gap: var(--gap);">
     <!-- CONTROL PANEL -->
     <section class="panel" style="width: 100%; flex-shrink: 0;">
       <div class="panel-head">
@@ -1922,6 +1922,23 @@
       if (btn && btn.dataset.sym) setActiveSymbol(btn.dataset.sym);
     });
 
+    function showView(view) {
+      const viewSeg = $("view-seg");
+      if (!viewSeg) return;
+      [...viewSeg.children].forEach(b => b.classList.toggle("active", b.dataset.view === view));
+      state.activeView = view;
+      const liveContainer = $("live-view-container");
+      const validationContainer = $("validation-view-container");
+      if (view === "validation") {
+        liveContainer.style.display = "none";
+        validationContainer.style.display = "flex";
+        $("val-symbol-label").textContent = "Active Symbol: " + state.activeSymbol;
+      } else {
+        liveContainer.style.display = "block";
+        validationContainer.style.display = "none";
+      }
+    }
+
     // Wire the Mode switcher
     const viewSeg = $("view-seg");
     if (viewSeg) viewSeg.addEventListener("click", (e) => {
@@ -1935,16 +1952,9 @@
         window.location.href = orderflowUrl;
         return;
       }
-      [...viewSeg.children].forEach(b => b.classList.toggle("active", b === btn));
-      state.activeView = view;
-      if (view === "live") {
-        $("live-view-container").style.display = "block";
-        $("validation-view-container").style.display = "none";
-      } else {
-        $("live-view-container").style.display = "none";
-        $("validation-view-container").style.display = "flex";
-        $("val-symbol-label").textContent = "Active Symbol: " + state.activeSymbol;
-      }
+      showView(view);
+      if (view === "validation") window.location.hash = "validation";
+      if (view === "live") history.replaceState(null, "", window.location.pathname + window.location.search);
     });
 
     // Wire the Validation trigger button
@@ -1978,6 +1988,11 @@
     // Random regime flips ONLY when there's no live GEX for the active asset.
     setInterval(() => { if (!state.connected && !state.gexLive) setRegime(Math.random() > 0.25); }, 9000);
 
+    showView(window.location.hash === "#validation" ? "validation" : "live");
+    if (window.location.hash !== "#validation") {
+      if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+      window.scrollTo(0, 0);
+    }
     setActiveSymbol("XAUUSD"); // default isolated asset (seeds panels + fetches)
     refreshMacro(); setInterval(refreshMacro, 60000);
     fetchForexFactoryNews(); setInterval(fetchForexFactoryNews, 300000);
