@@ -38,18 +38,16 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("TerminalCors", policy =>
     {
-        var origins = allowedOrigins.Length > 0
-            ? allowedOrigins
-            : new[]
-            {
-                "http://localhost:5000",
-                "http://127.0.0.1:5000",
-                "http://localhost:8000",
-                "http://127.0.0.1:8000"
-            };
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins);
+        }
+        else
+        {
+            policy.SetIsOriginAllowed(IsAllowedTerminalOrigin);
+        }
 
-        policy.WithOrigins(origins)
-              .AllowAnyHeader()
+        policy.AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
     });
@@ -66,9 +64,11 @@ builder.Services.AddRateLimiter(options =>
     });
     options.AddFixedWindowLimiter("private-write", limiter =>
     {
-        limiter.PermitLimit = 30;
+        // FeatureFactory publishes bursty multi-symbol telemetry. Keep this private/CORS scoped,
+        // but allow enough headroom that live cache updates are not starved by 429s.
+        limiter.PermitLimit = 600;
         limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
+        limiter.QueueLimit = 60;
         limiter.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
     });
 });
@@ -152,6 +152,24 @@ static string[] ParseAllowedOrigins(string? origins)
     return string.IsNullOrWhiteSpace(origins)
         ? Array.Empty<string>()
         : origins.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}
+
+static bool IsAllowedTerminalOrigin(string? origin)
+{
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+    {
+        return false;
+    }
+
+    if (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+        uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+    {
+        return uri.Port is 5000 or 8000 or 8010;
+    }
+
+    return uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) &&
+           (uri.Host.Equals("tbbfx-intelligence-web.pages.dev", StringComparison.OrdinalIgnoreCase) ||
+            uri.Host.EndsWith(".tbbfx-intelligence-web.pages.dev", StringComparison.OrdinalIgnoreCase));
 }
 
 static bool SecureEquals(string? actual, string expected)

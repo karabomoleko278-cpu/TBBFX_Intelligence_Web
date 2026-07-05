@@ -717,26 +717,36 @@
   const isHttp = window.location.protocol === "http:" || window.location.protocol === "https:";
   const sameOrigin = isHttp ? window.location.origin : "http://localhost:5000";
   const publicMode = PUBLIC_CONFIG.publicMode !== false;
+  const searchParams = new URLSearchParams(window.location.search);
+  const localBridgeConfig = PUBLIC_CONFIG.localBridge || {};
+  const localBridgeParam = localBridgeConfig.queryParam || "local";
+  const localBridgeValue = String(localBridgeConfig.queryValue || "1");
+  const localBridgeActive =
+    publicMode &&
+    localBridgeConfig.enabledByQuery !== false &&
+    searchParams.get(localBridgeParam) === localBridgeValue;
   const joinUrl = (base, path) => {
     if (!base) return "";
     return String(base).replace(/\/$/, "") + path;
   };
+  const bridgeOrPublic = (bridgeValue, publicValue, fallbackValue = "") =>
+    localBridgeActive ? (bridgeValue || fallbackValue) : publicValue;
 
   const CONFIG = {
-    // Centralized Feature Factory (FastAPI). NOTE: temporarily on :8010 because
-    // an orphaned socket from a process-restart wedged :8000 — a reboot frees it,
-    // after which these two lines can move back to :8000.
-    WS_URL: PUBLIC_CONFIG.featureWsUrl || (publicMode ? "" : "ws://localhost:8000/ws/features"),
+    // Centralized Feature Factory (FastAPI). The public site only connects to
+    // localhost when explicitly opened with ?local=1 on the same laptop.
+    WS_URL: bridgeOrPublic(localBridgeConfig.featureWsUrl, PUBLIC_CONFIG.featureWsUrl, "ws://localhost:8000/ws/features") || (publicMode ? "" : "ws://localhost:8000/ws/features"),
     // REST base for on-demand reads (momentum, exposure, greeks, volprofile, macro).
-    API_BASE: PUBLIC_CONFIG.featureFactoryBase || (publicMode ? "" : "http://localhost:8000"),
-    // SignalR URL for C# validation engine
-    SIGNALR_URL: PUBLIC_CONFIG.signalRUrl || (PUBLIC_CONFIG.signalRBase ? joinUrl(PUBLIC_CONFIG.signalRBase, "/hub/marketpulse") : (publicMode ? "" : "http://localhost:5000/hub/marketpulse")),
-    SIGNALR_MODE: PUBLIC_CONFIG.signalRMode || (publicMode ? "azure-signalr-serverless" : "aspnetcore-hub"),
-    // C# validation run API base
-    VALIDATION_API_BASE: PUBLIC_CONFIG.apiBase || (publicMode ? sameOrigin : "http://localhost:5000"),
+    API_BASE: bridgeOrPublic(localBridgeConfig.featureFactoryBase, PUBLIC_CONFIG.featureFactoryBase, "http://localhost:8000") || (publicMode ? "" : "http://localhost:8000"),
+    // SignalR URL for C# validation engine and live relay pulses.
+    SIGNALR_URL: bridgeOrPublic(localBridgeConfig.signalRUrl, PUBLIC_CONFIG.signalRUrl || (PUBLIC_CONFIG.signalRBase ? joinUrl(PUBLIC_CONFIG.signalRBase, "/hub/marketpulse") : ""), "http://localhost:5000/hub/marketpulse") || (publicMode ? "" : "http://localhost:5000/hub/marketpulse"),
+    SIGNALR_MODE: localBridgeActive ? (localBridgeConfig.signalRMode || "aspnetcore-hub") : (PUBLIC_CONFIG.signalRMode || (publicMode ? "azure-signalr-serverless" : "aspnetcore-hub")),
+    // C# validation run API base. Validation remains disabled in public config unless explicitly enabled.
+    VALIDATION_API_BASE: bridgeOrPublic(localBridgeConfig.apiBase, PUBLIC_CONFIG.apiBase, "http://localhost:5000") || (publicMode ? sameOrigin : "http://localhost:5000"),
     PUBLIC_MODE: publicMode,
-    ALLOW_VALIDATION: PUBLIC_CONFIG.allowValidation === true,
-    ALLOW_TRADING: PUBLIC_CONFIG.allowTrading === true,
+    LOCAL_BRIDGE: localBridgeActive,
+    ALLOW_VALIDATION: localBridgeActive ? localBridgeConfig.allowValidation === true : PUBLIC_CONFIG.allowValidation === true,
+    ALLOW_TRADING: false,
     // TBBFX traded instruments (mirrors the MAUI app watchlist + MT5 charts).
     SYMBOLS: ["XAUUSD", "USTEC", "US30", "EURUSD", "GBPUSD", "USDJPY"],
     VENUES: ["UBS ATS", "SIGMA X", "CrossFinder", "MS POOL", "LX", "IEX D-Peg"],
@@ -1226,17 +1236,20 @@
     const signalrLive = feedStatus.signalr;
     const wsLive = feedStatus.ws;
     const isLive = signalrLive || wsLive;
-    const publicReadOnly = CONFIG.PUBLIC_MODE || source === "public-readonly";
+    const publicReadOnly = (CONFIG.PUBLIC_MODE && !CONFIG.LOCAL_BRIDGE) || source === "public-readonly";
     const publicStatusLabel = PUBLIC_CONFIG.statusLabel || "PUBLIC READ-ONLY";
+    const bridgeStatusLabel = (PUBLIC_CONFIG.localBridge && PUBLIC_CONFIG.localBridge.statusLabel) || "LOCAL TERMINAL BRIDGE";
     state.connected = isLive;
     $("online-dot").classList.toggle("sim", !isLive);
     $("online-state").textContent = signalrLive
-      ? "- LIVE SIGNALR FEED"
+      ? (CONFIG.LOCAL_BRIDGE ? "- LOCAL SIGNALR LIVE" : "- LIVE SIGNALR FEED")
       : wsLive
-        ? "- LIVE WS FEED"
-        : publicReadOnly
-          ? `- ${publicStatusLabel}`
-          : "- SIMULATED FEED";
+        ? (CONFIG.LOCAL_BRIDGE ? "- LOCAL WS LIVE" : "- LIVE WS FEED")
+        : CONFIG.LOCAL_BRIDGE
+          ? `- ${bridgeStatusLabel} OFFLINE`
+          : publicReadOnly
+            ? `- ${publicStatusLabel}`
+            : "- SIMULATED FEED";
   }
 
   function applyLivePayload(p) {
@@ -1947,7 +1960,7 @@
       const view = btn.dataset.view;
       if (view === "orderflow") {
         const orderflowUrl = window.location.protocol.startsWith("http")
-          ? `${window.location.origin}/orderflow.html`
+          ? `${window.location.origin}/orderflow.html${window.location.search}`
           : "./orderflow.html";
         window.location.href = orderflowUrl;
         return;
@@ -1996,7 +2009,7 @@
     setActiveSymbol("XAUUSD"); // default isolated asset (seeds panels + fetches)
     refreshMacro(); setInterval(refreshMacro, 60000);
     fetchForexFactoryNews(); setInterval(fetchForexFactoryNews, 300000);
-    setOnline(false, CONFIG.PUBLIC_MODE ? "public-readonly" : "ws");
+    setOnline(false, CONFIG.LOCAL_BRIDGE ? "local-bridge" : (CONFIG.PUBLIC_MODE ? "public-readonly" : "ws"));
     connect();
     connectSignalR();
   }

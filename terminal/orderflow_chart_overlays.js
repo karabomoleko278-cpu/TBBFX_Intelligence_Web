@@ -83,9 +83,20 @@
   function tfRenderCount() { return tfRenderMap[state.timeframe] || tfRenderMap.M5; }
   function runtimeConfig() { return window.TBBFX_PUBLIC_CONFIG || {}; }
   function trimSlash(v) { return String(v || "").replace(/\/$/, ""); }
+  function localBridgeActive() {
+    var cfg = runtimeConfig();
+    var bridge = cfg.localBridge || {};
+    if (cfg.publicMode === false || bridge.enabledByQuery === false) return false;
+    var param = bridge.queryParam || "local";
+    var value = String(bridge.queryValue || "1");
+    return new URLSearchParams(window.location.search).get(param) === value;
+  }
+  function localBridgeConfig() { return runtimeConfig().localBridge || {}; }
 
   function apiBase() {
     var cfg = runtimeConfig();
+    var bridge = localBridgeConfig();
+    if (localBridgeActive() && bridge.apiBase) return trimSlash(bridge.apiBase);
     if (cfg.apiBase) return trimSlash(cfg.apiBase);
     return window.location.protocol.indexOf("http") === 0 ? window.location.origin : "http://localhost:5000";
   }
@@ -96,12 +107,16 @@
 
   function featureFactoryUrl(path) {
     var cfg = runtimeConfig();
+    var bridge = localBridgeConfig();
+    if (localBridgeActive()) return trimSlash(bridge.featureFactoryBase || "http://localhost:8000") + path;
     if (!cfg.featureFactoryBase && cfg.publicMode !== false) return "";
     return trimSlash(cfg.featureFactoryBase || "http://localhost:8000") + path;
   }
 
   function signalRUrl(path) {
     var cfg = runtimeConfig();
+    var bridge = localBridgeConfig();
+    if (localBridgeActive() && bridge.signalRUrl) return trimSlash(bridge.signalRUrl);
     if (cfg.signalRUrl) return trimSlash(cfg.signalRUrl);
     if (!cfg.signalRBase && cfg.publicMode !== false) return "";
     return trimSlash(cfg.signalRBase || apiBase()) + path;
@@ -184,6 +199,20 @@
     });
     document.querySelectorAll(".time-button").forEach(function (b) {
       b.addEventListener("click", function () { setTimeframe(b.getAttribute("data-tf") || b.textContent); });
+    });
+    document.querySelectorAll("[data-preserve-query]").forEach(function (a) {
+      var href = a.getAttribute("href") || "";
+      var parts = href.split("#");
+      var query = window.location.search || "";
+      a.setAttribute("href", parts[0] + query + (parts[1] ? "#" + parts[1] : ""));
+    });
+    document.querySelectorAll(".mode-button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var label = (b.textContent || "").toLowerCase();
+        var query = window.location.search || "";
+        if (label.indexOf("live") >= 0) window.location.href = "./TBBFX%20Intelligence%20Terminal.html" + query;
+        if (label.indexOf("validation") >= 0) window.location.href = "./TBBFX%20Intelligence%20Terminal.html" + query + "#validation";
+      });
     });
   }
 
@@ -422,7 +451,7 @@
     if (!window.signalR) { setBadge("offline", "LIVE_SIGNAL: SIGNALR CLIENT MISSING - REAL FEED OFFLINE"); return; }
     var hubUrl = signalRUrl("/hub/marketpulse");
     if (!hubUrl) {
-      setBadge("degraded", "LIVE_SIGNAL: PUBLIC READ-ONLY - LIVE HUB NOT CONFIGURED");
+      setBadge("degraded", localBridgeActive() ? "LIVE_SIGNAL: LOCAL BRIDGE OFFLINE - START SIGNALRFEATURESTORE" : "LIVE_SIGNAL: PUBLIC READ-ONLY - LIVE HUB NOT CONFIGURED");
       return;
     }
 
@@ -440,10 +469,13 @@
     state.connection.onreconnecting(function () { setBadge("degraded", "LIVE_SIGNAL: RECONNECTING ORDER FLOW STREAM"); });
     state.connection.onreconnected(function () { join(state.symbol); setBadge("online", "LIVE_SIGNAL: GAMMA & ORDER FLOW SYNCED"); });
     state.connection.onclose(function () { setBadge("offline", "LIVE_SIGNAL: OFFLINE - REAL ORDER FLOW STREAM DISCONNECTED"); });
-    state.connection.start().then(function () { stopSim(); join(state.symbol); setBadge("online", "LIVE_SIGNAL: GAMMA & ORDER FLOW SYNCED"); }).catch(function () { setBadge("offline", "LIVE_SIGNAL: FEATURE STORE OFFLINE - REAL ORDER FLOW UNAVAILABLE"); });
+    state.connection.start().then(function () { stopSim(); join(state.symbol); setBadge("online", "LIVE_SIGNAL: GAMMA & ORDER FLOW SYNCED"); }).catch(function () { setBadge("offline", localBridgeActive() ? "LIVE_SIGNAL: LOCAL BRIDGE OFFLINE - CHECK PORT 5000" : "LIVE_SIGNAL: FEATURE STORE OFFLINE - REAL ORDER FLOW UNAVAILABLE"); });
   }
 
-  function isServerlessSignalR() { return runtimeConfig().signalRMode === "azure-signalr-serverless"; }
+  function isServerlessSignalR() {
+    if (localBridgeActive()) return (localBridgeConfig().signalRMode || "aspnetcore-hub") === "azure-signalr-serverless";
+    return runtimeConfig().signalRMode === "azure-signalr-serverless";
+  }
   function join(sym) {
     if (isServerlessSignalR()) return;
     if (state.connection && state.connection.state === "Connected") state.connection.invoke("JoinSymbolGroup", sym).catch(function () {});
