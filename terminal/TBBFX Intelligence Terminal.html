@@ -820,6 +820,10 @@
   function drawHeatmap() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     const cw = w / COLS, ch = h / ROWS;
+    if (!grid.length || grid.length < COLS || grid.some(col => !Array.isArray(col) || col.length < ROWS)) {
+      seedGrid();
+    }
+    ctx.clearRect(0, 0, w, h);
     for (let c = 0; c < COLS; c++) {
       for (let r = 0; r < ROWS; r++) {
         ctx.fillStyle = heatColor(grid[c][r]);
@@ -1151,7 +1155,7 @@
         $("macro-title").textContent = "NO RED FOLDERS";
       }
     } catch (err) {
-      console.error("Forex Factory fetch failed, falling back to simulated timer:", err);
+      if (!CONFIG.PUBLIC_MODE) console.warn("Forex Factory fetch failed, falling back to simulated timer:", err);
       if (!nextMacroTime) {
         $("macro-title").textContent = "FOMC Rate Decision";
         nextMacroTime = new Date(Date.now() + simulatedCountdown * 1000);
