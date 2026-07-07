@@ -715,7 +715,7 @@
 
   const PUBLIC_CONFIG = window.TBBFX_PUBLIC_CONFIG || {};
   const isHttp = window.location.protocol === "http:" || window.location.protocol === "https:";
-  const sameOrigin = isHttp ? window.location.origin : "http://localhost:5000";
+  const sameOrigin = isHttp ? window.location.origin : "http://127.0.0.1:5000";
   const publicMode = PUBLIC_CONFIG.publicMode !== false;
   const searchParams = new URLSearchParams(window.location.search);
   const localBridgeConfig = PUBLIC_CONFIG.localBridge || {};
@@ -735,14 +735,14 @@
   const CONFIG = {
     // Centralized Feature Factory (FastAPI). The public site only connects to
     // localhost when explicitly opened with ?local=1 on the same laptop.
-    WS_URL: bridgeOrPublic(localBridgeConfig.featureWsUrl, PUBLIC_CONFIG.featureWsUrl, "ws://localhost:8000/ws/features") || (publicMode ? "" : "ws://localhost:8000/ws/features"),
+    WS_URL: bridgeOrPublic(localBridgeConfig.featureWsUrl, PUBLIC_CONFIG.featureWsUrl, "ws://127.0.0.1:8000/ws/features") || (publicMode ? "" : "ws://127.0.0.1:8000/ws/features"),
     // REST base for on-demand reads (momentum, exposure, greeks, volprofile, macro).
-    API_BASE: bridgeOrPublic(localBridgeConfig.featureFactoryBase, PUBLIC_CONFIG.featureFactoryBase, "http://localhost:8000") || (publicMode ? "" : "http://localhost:8000"),
+    API_BASE: bridgeOrPublic(localBridgeConfig.featureFactoryBase, PUBLIC_CONFIG.featureFactoryBase, "http://127.0.0.1:8000") || (publicMode ? "" : "http://127.0.0.1:8000"),
     // SignalR URL for C# validation engine and live relay pulses.
-    SIGNALR_URL: bridgeOrPublic(localBridgeConfig.signalRUrl, PUBLIC_CONFIG.signalRUrl || (PUBLIC_CONFIG.signalRBase ? joinUrl(PUBLIC_CONFIG.signalRBase, "/hub/marketpulse") : ""), "http://localhost:5000/hub/marketpulse") || (publicMode ? "" : "http://localhost:5000/hub/marketpulse"),
+    SIGNALR_URL: bridgeOrPublic(localBridgeConfig.signalRUrl, PUBLIC_CONFIG.signalRUrl || (PUBLIC_CONFIG.signalRBase ? joinUrl(PUBLIC_CONFIG.signalRBase, "/hub/marketpulse") : ""), "http://127.0.0.1:5000/hub/marketpulse") || (publicMode ? "" : "http://127.0.0.1:5000/hub/marketpulse"),
     SIGNALR_MODE: localBridgeActive ? (localBridgeConfig.signalRMode || "aspnetcore-hub") : (PUBLIC_CONFIG.signalRMode || (publicMode ? "azure-signalr-serverless" : "aspnetcore-hub")),
     // C# validation run API base. Validation remains disabled in public config unless explicitly enabled.
-    VALIDATION_API_BASE: bridgeOrPublic(localBridgeConfig.apiBase, PUBLIC_CONFIG.apiBase, "http://localhost:5000") || (publicMode ? sameOrigin : "http://localhost:5000"),
+    VALIDATION_API_BASE: bridgeOrPublic(localBridgeConfig.apiBase, PUBLIC_CONFIG.apiBase, "http://127.0.0.1:5000") || (publicMode ? sameOrigin : "http://127.0.0.1:5000"),
     PUBLIC_MODE: publicMode,
     LOCAL_BRIDGE: localBridgeActive,
     ALLOW_VALIDATION: localBridgeActive ? localBridgeConfig.allowValidation === true : PUBLIC_CONFIG.allowValidation === true,

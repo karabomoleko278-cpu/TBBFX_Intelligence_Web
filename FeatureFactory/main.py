@@ -22,13 +22,24 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Enable CORS for MAUI and local web extensions
+# Enable CORS for MAUI, the local web terminal, and the hosted Cloudflare
+# terminal when it is explicitly opened with ?local=1 on the operator laptop.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:8010",
+        "http://127.0.0.1:8010",
+        "https://tbbfx-intelligence-web.pages.dev",
+    ],
+    allow_origin_regex=r"https://.*\.tbbfx-intelligence-web\.pages\.dev",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_private_network=True,
 )
 
 # Background task and stream processor references

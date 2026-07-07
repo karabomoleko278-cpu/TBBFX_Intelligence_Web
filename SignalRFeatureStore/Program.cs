@@ -84,6 +84,22 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.Use(async (context, next) =>
+{
+    if (context.Request.Headers.TryGetValue("Access-Control-Request-Private-Network", out var privateNetwork) &&
+        string.Equals(privateNetwork.FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase) &&
+        IsAllowedTerminalOrigin(context.Request.Headers.Origin.FirstOrDefault()))
+    {
+        context.Response.OnStarting(() =>
+        {
+            context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
+            return Task.CompletedTask;
+        });
+    }
+
+    await next();
+});
+
 app.UseCors("TerminalCors");
 app.UseRateLimiter();
 

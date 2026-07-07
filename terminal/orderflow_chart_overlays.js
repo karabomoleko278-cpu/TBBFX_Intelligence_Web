@@ -98,7 +98,7 @@
     var bridge = localBridgeConfig();
     if (localBridgeActive() && bridge.apiBase) return trimSlash(bridge.apiBase);
     if (cfg.apiBase) return trimSlash(cfg.apiBase);
-    return window.location.protocol.indexOf("http") === 0 ? window.location.origin : "http://localhost:5000";
+    return window.location.protocol.indexOf("http") === 0 ? window.location.origin : "http://127.0.0.1:5000";
   }
 
   function apiUrl(path) {
@@ -108,9 +108,9 @@
   function featureFactoryUrl(path) {
     var cfg = runtimeConfig();
     var bridge = localBridgeConfig();
-    if (localBridgeActive()) return trimSlash(bridge.featureFactoryBase || "http://localhost:8000") + path;
+    if (localBridgeActive()) return trimSlash(bridge.featureFactoryBase || "http://127.0.0.1:8000") + path;
     if (!cfg.featureFactoryBase && cfg.publicMode !== false) return "";
-    return trimSlash(cfg.featureFactoryBase || "http://localhost:8000") + path;
+    return trimSlash(cfg.featureFactoryBase || "http://127.0.0.1:8000") + path;
   }
 
   function signalRUrl(path) {
