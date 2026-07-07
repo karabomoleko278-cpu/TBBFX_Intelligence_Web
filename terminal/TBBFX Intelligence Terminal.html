@@ -4,6 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>TBBFX Intelligence Terminal</title>
+<script>
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+  if (window.location.hash !== "#validation") window.scrollTo(0, 0);
+</script>
 <style>
   /* ===================================================================
      DESIGN TOKENS
@@ -380,7 +384,7 @@
     <button class="symtab" data-sym="US30">US30</button>
     <button class="symtab" data-sym="USTEC">USTEC</button>
     <button class="symtab" data-sym="USDJPY">USDJPY</button>
-    
+
     <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
       <span class="barlabel">Mode</span>
       <div class="seg" id="view-seg">
@@ -686,7 +690,7 @@
               </div>
             </div>
           </div>
-          
+
         </div>
       </section>
     </div>
@@ -721,10 +725,17 @@
   const localBridgeConfig = PUBLIC_CONFIG.localBridge || {};
   const localBridgeParam = localBridgeConfig.queryParam || "local";
   const localBridgeValue = String(localBridgeConfig.queryValue || "1");
-  const localBridgeActive =
+  const localBridgeRequested =
     publicMode &&
     localBridgeConfig.enabledByQuery !== false &&
     searchParams.get(localBridgeParam) === localBridgeValue;
+  const hostedPages = /(^|\.)pages\.dev$/i.test(window.location.hostname) ||
+    window.location.hostname === "tbbfx-intelligence-web.pages.dev";
+  const localBridgeAuto =
+    publicMode &&
+    localBridgeConfig.autoDetect !== false &&
+    hostedPages;
+  const localBridgeActive = localBridgeRequested || localBridgeAuto;
   const joinUrl = (base, path) => {
     if (!base) return "";
     return String(base).replace(/\/$/, "") + path;
@@ -745,6 +756,8 @@
     VALIDATION_API_BASE: bridgeOrPublic(localBridgeConfig.apiBase, PUBLIC_CONFIG.apiBase, "http://127.0.0.1:5000") || (publicMode ? sameOrigin : "http://127.0.0.1:5000"),
     PUBLIC_MODE: publicMode,
     LOCAL_BRIDGE: localBridgeActive,
+    LOCAL_BRIDGE_REQUESTED: localBridgeRequested,
+    LOCAL_BRIDGE_AUTO: localBridgeAuto,
     ALLOW_VALIDATION: localBridgeActive ? localBridgeConfig.allowValidation === true : PUBLIC_CONFIG.allowValidation === true,
     ALLOW_TRADING: false,
     // TBBFX traded instruments (mirrors the MAUI app watchlist + MT5 charts).
@@ -1144,19 +1157,19 @@
       const response = await fetch("https://nfs.faireconomy.media/ff_calendar_thisweek.json");
       if (!response.ok) throw new Error("Calendar fetch failed");
       const events = await response.json();
-      
+
       const now = new Date();
       const tradedCurrencies = ["USD", "EUR", "GBP", "JPY"];
-      
+
       const highImpactEvents = events.filter(e => {
         if (e.impact !== "High") return false;
         if (!tradedCurrencies.includes(e.country.toUpperCase())) return false;
         const eventTime = new Date(e.date);
         return eventTime > now;
       });
-      
+
       highImpactEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
-      
+
       if (highImpactEvents.length > 0) {
         const nextEvent = highImpactEvents[0];
         nextMacroTime = new Date(nextEvent.date);
@@ -1187,7 +1200,7 @@
       }
       return;
     }
-    
+
     const now = new Date();
     const diffMs = nextMacroTime - now;
     if (diffMs <= 0) {
@@ -1196,7 +1209,7 @@
       fetchForexFactoryNews();
       return;
     }
-    
+
     const diffSecs = Math.floor(diffMs / 1000);
     const h = String(diffSecs / 3600 | 0).padStart(2, "0");
     const m = String((diffSecs % 3600) / 60 | 0).padStart(2, "0");
@@ -1238,6 +1251,7 @@
     const wsLive = feedStatus.ws;
     const isLive = signalrLive || wsLive;
     const publicReadOnly = (CONFIG.PUBLIC_MODE && !CONFIG.LOCAL_BRIDGE) || source === "public-readonly";
+    const autoFallbackToPublic = CONFIG.LOCAL_BRIDGE_AUTO && !CONFIG.LOCAL_BRIDGE_REQUESTED && !isLive;
     const publicStatusLabel = PUBLIC_CONFIG.statusLabel || "PUBLIC READ-ONLY";
     const bridgeStatusLabel = (PUBLIC_CONFIG.localBridge && PUBLIC_CONFIG.localBridge.statusLabel) || "LOCAL TERMINAL BRIDGE";
     state.connected = isLive;
@@ -1246,9 +1260,9 @@
       ? (CONFIG.LOCAL_BRIDGE ? "- LOCAL SIGNALR LIVE" : "- LIVE SIGNALR FEED")
       : wsLive
         ? (CONFIG.LOCAL_BRIDGE ? "- LOCAL WS LIVE" : "- LIVE WS FEED")
-        : CONFIG.LOCAL_BRIDGE
+        : CONFIG.LOCAL_BRIDGE && !autoFallbackToPublic
           ? `- ${bridgeStatusLabel} OFFLINE`
-          : publicReadOnly
+          : publicReadOnly || autoFallbackToPublic
             ? `- ${publicStatusLabel}`
             : "- SIMULATED FEED";
   }
@@ -1605,10 +1619,10 @@
       ctx.fillStyle = "rgba(11, 26, 22, 0.9)";
       ctx.strokeStyle = "#f3b13f";
       ctx.lineWidth = 1;
-      
+
       const textW = ctx.measureText(labelText).width + 12;
       const textH = 16;
-      
+
       let boxX = xCenter + 10;
       let boxY = yCenter - 25;
       if (boxX + textW > w) {
@@ -1734,7 +1748,7 @@
 
       $("val-mc-ruin").textContent = (riskOfRuin * 100).toFixed(1) + "%";
       $("val-mc-ruin").style.color = riskOfRuin > 0.05 ? "var(--neg)" : "var(--neon)";
-      
+
       $("val-mc-survival").textContent = survives ? "SURVIVES" : "RUINED";
       $("val-mc-survival").style.color = survives ? "var(--neon)" : "var(--neg)";
 
@@ -1763,7 +1777,7 @@
     ]);
 
     if (clusterChartInstance) clusterChartInstance.destroy();
-    
+
     const datasets = clusters.map(c => {
       const pts = normPoints.filter(p => p[2] === c.clusterId).map(p => ({ x: p[0], y: p[1] }));
       return {
@@ -1803,16 +1817,16 @@
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-          y: { 
-            title: { display: true, text: "Normalized -MaxDrawdown", color: "#aebfb8" }, 
-            grid: { color: "rgba(46,230,166,0.06)" }, 
+          y: {
+            title: { display: true, text: "Normalized -MaxDrawdown", color: "#aebfb8" },
+            grid: { color: "rgba(46,230,166,0.06)" },
             ticks: { color: "#aebfb8" },
             min: 0.0,
             max: 1.0
           },
-          x: { 
-            title: { display: true, text: "Normalized Sharpe Ratio", color: "#aebfb8" }, 
-            grid: { color: "rgba(46,230,166,0.06)" }, 
+          x: {
+            title: { display: true, text: "Normalized Sharpe Ratio", color: "#aebfb8" },
+            grid: { color: "rgba(46,230,166,0.06)" },
             ticks: { color: "#aebfb8" },
             min: 0.0,
             max: 1.0
@@ -1834,7 +1848,7 @@
 
     const oosEquity = res.wfResult.aggregateOosEquity || [];
     if (wfChartInstance) wfChartInstance.destroy();
-    
+
     wfChartInstance = new Chart($("val-wf-chart"), {
       type: "line",
       data: {

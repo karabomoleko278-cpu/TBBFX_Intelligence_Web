@@ -1,11 +1,12 @@
 // Public runtime configuration for free static hosting such as Cloudflare Pages.
 // This file is intentionally safe to publish: it contains no secrets and no private MT5 endpoints.
 //
-// The local bridge is opt-in: add ?local=1 to the public URL while the local
-// SignalRFeatureStore and FeatureFactory terminals are running on this laptop.
-// Without that query flag the hosted site remains public read-only.
+// The hosted site can auto-detect the same-laptop local bridge on Cloudflare Pages.
+// Add ?local=1 to force local bridge mode while SignalRFeatureStore and FeatureFactory
+// are running on this laptop. Remote visitors remain public read-only.
 const TBBFX_LOCAL_BRIDGE = Object.freeze({
   enabledByQuery: true,
+  autoDetect: true,
   queryParam: "local",
   queryValue: "1",
   featureFactoryBase: "http://127.0.0.1:8000",

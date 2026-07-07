@@ -6,11 +6,11 @@
     },
     {
       "route": "/terminal",
-      "rewrite": "/TBBFX Intelligence Terminal.html"
+      "rewrite": "/index.html"
     },
     {
       "route": "/orderflow",
-      "rewrite": "/orderflow.html"
+      "rewrite": "/orderflow/index.html"
     },
     {
       "route": "/api/validation/*",

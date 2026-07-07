@@ -180,7 +180,7 @@ static bool IsAllowedTerminalOrigin(string? origin)
     if (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
         uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
     {
-        return uri.Port is 5000 or 8000 or 8010;
+        return uri.Port is 5000 or 8000 or 8010 or 8787;
     }
 
     return uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) &&

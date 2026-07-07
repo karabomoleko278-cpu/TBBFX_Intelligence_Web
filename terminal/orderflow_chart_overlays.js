@@ -86,10 +86,15 @@
   function localBridgeActive() {
     var cfg = runtimeConfig();
     var bridge = cfg.localBridge || {};
-    if (cfg.publicMode === false || bridge.enabledByQuery === false) return false;
+    if (cfg.publicMode === false) return false;
     var param = bridge.queryParam || "local";
     var value = String(bridge.queryValue || "1");
-    return new URLSearchParams(window.location.search).get(param) === value;
+    var requested = bridge.enabledByQuery !== false &&
+      new URLSearchParams(window.location.search).get(param) === value;
+    var hostedPages = /(^|\.)pages\.dev$/i.test(window.location.hostname) ||
+      window.location.hostname === "tbbfx-intelligence-web.pages.dev";
+    var auto = bridge.autoDetect !== false && hostedPages;
+    return requested || auto;
   }
   function localBridgeConfig() { return runtimeConfig().localBridge || {}; }
 
@@ -211,8 +216,8 @@
         var label = (b.textContent || "").toLowerCase();
         var query = window.location.search || "";
         var terminalBase = window.location.protocol.indexOf("http") === 0
-          ? window.location.origin + "/TBBFX%20Intelligence%20Terminal"
-          : "./TBBFX%20Intelligence%20Terminal.html";
+          ? window.location.origin + "/"
+          : "./TBBFX Intelligence Terminal.html";
         if (label.indexOf("live") >= 0) window.location.href = terminalBase + query;
         if (label.indexOf("validation") >= 0) window.location.href = terminalBase + query + "#validation";
       });
