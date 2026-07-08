@@ -30,17 +30,19 @@ const TBBFX_LOCAL_BRIDGE = Object.freeze({
   statusLabel: "LOCAL TERMINAL BRIDGE"
 });
 
+const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+
 window.TBBFX_PUBLIC_CONFIG = Object.freeze({
-  publicMode: true,
-  allowTrading: false,
-  allowValidation: false,
+  publicMode: !isLocal,
+  allowTrading: isLocal,
+  allowValidation: isLocal,
   apiBase: "",
   featureFactoryBase: "",
   featureWsUrl: "",
   signalRUrl: "",
-  signalRMode: "static-readonly",
+  signalRMode: isLocal ? "aspnetcore-hub" : "static-readonly",
   signalRBase: "",
-  statusLabel: "PUBLIC READ-ONLY",
+  statusLabel: isLocal ? "LOCAL DEV SYSTEM" : "PUBLIC READ-ONLY",
   secureBridge: TBBFX_SECURE_BRIDGE,
   localBridge: TBBFX_LOCAL_BRIDGE
 });

@@ -141,9 +141,29 @@
     return window.location.protocol.indexOf("http") === 0 ? window.location.origin : "http://127.0.0.1:5000";
   }
 
+  function secureBridgeKey() {
+    try {
+      var searchParams = new URLSearchParams(window.location.search);
+      var key = searchParams.get("key");
+      if (key) {
+        window.localStorage.setItem("tbbfx.secureBridgeKey", key);
+        return key;
+      }
+      return window.localStorage.getItem("tbbfx.secureBridgeKey") || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
   function apiUrl(path) {
     var base = apiBase();
-    return base ? base + path : "";
+    if (!base) return "";
+    var url = base + path;
+    var key = secureBridgeKey();
+    if (key) {
+      url += (url.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(key);
+    }
+    return url;
   }
 
   function featureFactoryUrl(path) {

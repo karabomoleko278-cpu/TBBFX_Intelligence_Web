@@ -49,10 +49,43 @@ The hosted terminal can demonstrate the public interface and simulated/read-only
 
 ## Secure Live Bridge For Your Own Devices
 
-Cloudflare Pages is public HTTPS, so browsers will not reliably let it talk straight to `http://127.0.0.1:5000` on your laptop. To view your private running terminal data from the hosted site, run a secure tunnel to `SignalRFeatureStore` and open the hosted terminal with the tunnel URL:
+Cloudflare Pages is public HTTPS, so browsers will not reliably let it talk straight to `http://127.0.0.1:5000` on your laptop. To view your private running terminal data from the hosted site, you can launch a secure tunnel to `SignalRFeatureStore` using our automated bridge script.
+
+### Launching the Bridge
+
+Run the PowerShell helper script located at the repository root:
+
+```powershell
+cd "C:\Users\Dineo Lebese\source\repos\TBBFX_Intelligence_Web"
+powershell -ExecutionPolicy Bypass -File .\Start-TBBFX-Bridge.ps1 -OpenBrowser
+```
+
+This script will automatically:
+1. Locate your local `cloudflared` installation.
+2. Check if the backend on `http://127.0.0.1:5000` is running.
+3. Start the tunnel and extract the public tunnel URL.
+4. Output the direct hosted terminal links and open them in your default browser.
+
+If the backend prints a dynamic security key on startup, pass that key into the bridge script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Start-TBBFX-Bridge.ps1 -Key "<backend-startup-key>" -OpenBrowser
+```
+
+With a key supplied, the terminal URL includes `allowValidation=true` and the private bridge key, so protected validation/profile endpoints can work through the Cloudflare tunnel without making those endpoints anonymous.
+
+### Manual Tunnel Start
+
+If you prefer to start the tunnel manually:
 
 ```powershell
 cloudflared tunnel --url http://127.0.0.1:5000
+```
+
+If PowerShell says `cloudflared` is not recognized, use the installed binary path directly:
+
+```powershell
+& "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --url http://127.0.0.1:5000
 ```
 
 Then open:
@@ -60,6 +93,13 @@ Then open:
 ```text
 https://tbbfx-intelligence-web.pages.dev/?bridge=https://YOUR-TUNNEL.trycloudflare.com
 https://tbbfx-intelligence-web.pages.dev/orderflow/?bridge=https://YOUR-TUNNEL.trycloudflare.com
+```
+
+For protected validation mode, append the backend startup key:
+
+```text
+https://tbbfx-intelligence-web.pages.dev/?bridge=https://YOUR-TUNNEL.trycloudflare.com&allowValidation=true&key=BACKEND-STARTUP-KEY
+https://tbbfx-intelligence-web.pages.dev/orderflow/?bridge=https://YOUR-TUNNEL.trycloudflare.com&key=BACKEND-STARTUP-KEY
 ```
 
 The bridge URL is stored locally in the browser so refreshes keep using it. Use a fresh tunnel URL whenever you restart a quick tunnel.

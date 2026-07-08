@@ -759,6 +759,14 @@
   writeStoredBridge(secureBridgeStorageKey, secureBridgeUrl);
   if (secureFeatureBridgeUrl && secureFeatureBridgeUrl !== secureBridgeUrl) writeStoredBridge(secureFeatureStorageKey, secureFeatureBridgeUrl);
 
+  const secureBridgeKey = searchParams.get("key") || window.localStorage.getItem("tbbfx.secureBridgeKey") || "";
+  if (searchParams.get("key")) {
+    try { window.localStorage.setItem("tbbfx.secureBridgeKey", searchParams.get("key")); } catch (_) {}
+  }
+
+  const qAllowValidation = !!secureBridgeKey && searchParams.get("allowValidation") === "true";
+  const qAllowTrading = !!secureBridgeKey && searchParams.get("allowTrading") === "true";
+
   const localBridgeRequested =
     publicMode &&
     !secureBridgeUrl &&
@@ -796,12 +804,24 @@
     SECURE_BRIDGE_URL: secureBridgeUrl,
     LOCAL_BRIDGE_REQUESTED: localBridgeRequested,
     LOCAL_BRIDGE_AUTO: localBridgeAuto,
-    ALLOW_VALIDATION: secureBridgeActive ? localBridgeConfig.allowValidation === true : (localBridgeRequested ? localBridgeConfig.allowValidation === true : PUBLIC_CONFIG.allowValidation === true),
-    ALLOW_TRADING: false,
+    ALLOW_VALIDATION: qAllowValidation || (secureBridgeActive ? localBridgeConfig.allowValidation === true : (localBridgeRequested ? localBridgeConfig.allowValidation === true : PUBLIC_CONFIG.allowValidation === true)),
+    ALLOW_TRADING: qAllowTrading || (secureBridgeActive ? localBridgeConfig.allowTrading === true : (localBridgeRequested ? localBridgeConfig.allowTrading === true : PUBLIC_CONFIG.allowTrading === true)),
     // TBBFX traded instruments (mirrors the MAUI app watchlist + MT5 charts).
     SYMBOLS: ["XAUUSD", "USTEC", "US30", "EURUSD", "GBPUSD", "USDJPY"],
     VENUES: ["UBS ATS", "SIGMA X", "CrossFinder", "MS POOL", "LX", "IEX D-Peg"],
   };
+
+  function appendKey(url) {
+    if (!secureBridgeKey) return url;
+    try {
+      const u = new URL(url);
+      u.searchParams.set("key", secureBridgeKey);
+      return u.toString();
+    } catch (_) {
+      const separator = url.indexOf("?") >= 0 ? "&" : "?";
+      return url + separator + "key=" + encodeURIComponent(secureBridgeKey);
+    }
+  }
 
   const $ = (id) => document.getElementById(id);
   const fmt = (n, d = 2) => Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -1040,7 +1060,7 @@
   async function refreshMomentum() {
     const sym = state.activeSymbol;
     try {
-      const r = await fetch(`${CONFIG.API_BASE}/api/momentum/${sym}`, { cache: "no-store" });
+      const r = await fetch(appendKey(`${CONFIG.API_BASE}/api/momentum/${sym}`), { cache: "no-store" });
       if (!r.ok) throw new Error("bad status");
       const d = await r.json();
       if (sym !== state.activeSymbol) return; // tab changed mid-flight — drop stale
@@ -1054,7 +1074,7 @@
   // Real US 10-year treasury yield for the macro header (Massive, when entitled).
   async function refreshMacro() {
     try {
-      const r = await fetch(CONFIG.API_BASE + "/api/macro", { cache: "no-store" });
+      const r = await fetch(appendKey(CONFIG.API_BASE + "/api/macro"), { cache: "no-store" });
       if (!r.ok) throw new Error("bad status");
       const d = await r.json();
       if (typeof d.us10y === "number") $("us10y").textContent = d.us10y.toFixed(3) + "%";
@@ -1065,7 +1085,7 @@
   // server-side — the browser can't touch SQLite directly).
   async function refreshGex(sym) {
     try {
-      const r = await fetch(`${CONFIG.API_BASE}/api/exposure/${sym}`, { cache: "no-store" });
+      const r = await fetch(appendKey(`${CONFIG.API_BASE}/api/exposure/${sym}`), { cache: "no-store" });
       if (!r.ok) throw new Error("bad status");
       const d = await r.json();
       if (sym !== state.activeSymbol) return; // stale response after a tab switch
@@ -1085,7 +1105,7 @@
   // from the options chain server-side. Overrides the per-asset sim when it lands.
   async function refreshGreeks(sym) {
     try {
-      const r = await fetch(`${CONFIG.API_BASE}/api/greeks/${sym}`, { cache: "no-store" });
+      const r = await fetch(appendKey(`${CONFIG.API_BASE}/api/greeks/${sym}`), { cache: "no-store" });
       if (!r.ok) throw new Error("bad status");
       const d = await r.json();
       if (sym !== state.activeSymbol) return; // stale after a tab switch
@@ -1101,7 +1121,7 @@
   // heatmap intensity (per price row) and anchors the price line to real closes.
   async function refreshHeatmap(sym) {
     try {
-      const r = await fetch(`${CONFIG.API_BASE}/api/volprofile/${sym}`, { cache: "no-store" });
+      const r = await fetch(appendKey(`${CONFIG.API_BASE}/api/volprofile/${sym}`), { cache: "no-store" });
       if (!r.ok) throw new Error("bad status");
       const d = await r.json();
       if (sym !== state.activeSymbol) return;
@@ -1382,7 +1402,7 @@
   async function fetchLatestSignalRFeature(sym = state.activeSymbol) {
     if (!CONFIG.VALIDATION_API_BASE) return;
     try {
-      const r = await fetch(`${CONFIG.VALIDATION_API_BASE}/features/latest/${sym}`, { cache: "no-store" });
+      const r = await fetch(appendKey(`${CONFIG.VALIDATION_API_BASE}/features/latest/${sym}`), { cache: "no-store" });
       if (!r.ok) return;
       receiveSignalRPulse(await r.json());
     } catch (_) {
@@ -1963,7 +1983,7 @@
     $("val-status-msg").textContent = `Triggering validation for ${symbol} via SignalR server...`;
 
     try {
-      const response = await fetch(`${CONFIG.VALIDATION_API_BASE}/api/validation/run/${symbol}`, {
+      const response = await fetch(appendKey(`${CONFIG.VALIDATION_API_BASE}/api/validation/run/${symbol}`), {
         method: "POST"
       });
       const data = await response.json();

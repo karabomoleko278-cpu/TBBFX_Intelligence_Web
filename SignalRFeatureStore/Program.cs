@@ -23,6 +23,20 @@ var configuredPort = int.TryParse(Environment.GetEnvironmentVariable("PORT"), ou
     : 5000;
 var publicReadOnly = IsTruthy(builder.Configuration["TBBFX_PUBLIC_READONLY"]);
 var featureUpdateKey = builder.Configuration["TBBFX_FEATURE_UPDATE_KEY"];
+var activeSecurityKey = featureUpdateKey;
+if (string.IsNullOrWhiteSpace(activeSecurityKey))
+{
+    activeSecurityKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+    Console.WriteLine("");
+    Console.WriteLine("==========================================================================================");
+    Console.WriteLine($"[Security] Dynamic TBBFX security key generated: {activeSecurityKey}");
+    Console.WriteLine("[Security] To use the secure live bridge, use this key in your browser URL query parameter:");
+    Console.WriteLine($"[Security] https://tbbfx-intelligence-web.pages.dev/?bridge=https://<your-tunnel>.trycloudflare.com&allowValidation=true&key={activeSecurityKey}");
+    Console.WriteLine($"[Security] Or for orderflow:");
+    Console.WriteLine($"[Security] https://tbbfx-intelligence-web.pages.dev/orderflow/?bridge=https://<your-tunnel>.trycloudflare.com&key={activeSecurityKey}");
+    Console.WriteLine("==========================================================================================");
+    Console.WriteLine("");
+}
 var allowedOrigins = ParseAllowedOrigins(builder.Configuration["TBBFX_ALLOWED_ORIGINS"]);
 
 // Configure port to run on 5000 locally; Azure can inject PORT when hosted behind a platform proxy.
@@ -202,6 +216,51 @@ static bool SecureEquals(string? actual, string expected)
            CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
 }
 
+static bool IsRemoteRequest(HttpContext context)
+{
+    if (context.Request.Headers.ContainsKey("X-Forwarded-Host"))
+    {
+        return true;
+    }
+    if (context.Request.Headers.TryGetValue("Origin", out var origin) && !string.IsNullOrEmpty(origin))
+    {
+        var originStr = origin.ToString();
+        if (!originStr.Contains("localhost") && !originStr.Contains("127.0.0.1"))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool IsAuthorized(HttpContext context, string activeKey, string? expectedUpdateKey)
+{
+    if (!IsRemoteRequest(context))
+    {
+        return true;
+    }
+
+    string? requestKey = context.Request.Headers["X-TBBFX-KEY"].FirstOrDefault()
+                         ?? context.Request.Query["key"].FirstOrDefault();
+
+    if (string.IsNullOrEmpty(requestKey))
+    {
+        return false;
+    }
+
+    if (SecureEquals(requestKey, activeKey))
+    {
+        return true;
+    }
+
+    if (!string.IsNullOrEmpty(expectedUpdateKey) && SecureEquals(requestKey, expectedUpdateKey))
+    {
+        return true;
+    }
+
+    return false;
+}
+
 static List<CandleWire> LoadCsvCandles(string symbol)
 {
     var path = ResolveHistoricalCsvPath(symbol);
@@ -377,11 +436,16 @@ app.MapGet("/orderflow_chart_overlays.js", () =>
         : Results.NotFound(new { error = $"Orderflow overlay script not found at {scriptPath}" });
 });
 
-app.MapGet("/api/live-scanner/profile", () =>
+app.MapGet("/api/live-scanner/profile", (HttpContext http) =>
 {
     if (publicReadOnly)
     {
         return Results.NotFound();
+    }
+
+    if (!IsAuthorized(http, activeSecurityKey, featureUpdateKey))
+    {
+        return Results.Unauthorized();
     }
 
     var configPath = Path.Combine(
@@ -450,18 +514,21 @@ app.MapPost("/features/update", async (
         return Results.NotFound();
     }
 
-    if (!string.IsNullOrWhiteSpace(featureUpdateKey) &&
-        !SecureEquals(http.Request.Headers["X-TBBFX-FEATURE-KEY"].FirstOrDefault(), featureUpdateKey))
+    var effectiveUpdateKey = string.IsNullOrWhiteSpace(featureUpdateKey) ? activeSecurityKey : featureUpdateKey;
+    if (!SecureEquals(http.Request.Headers["X-TBBFX-FEATURE-KEY"].FirstOrDefault(), effectiveUpdateKey) &&
+        !SecureEquals(http.Request.Headers["X-TBBFX-KEY"].FirstOrDefault(), effectiveUpdateKey) &&
+        !SecureEquals(http.Request.Query["key"].FirstOrDefault(), effectiveUpdateKey))
     {
-        return Results.Unauthorized();
-    }
-
-    if (string.IsNullOrWhiteSpace(featureUpdateKey) &&
-        http.Request.Headers.ContainsKey("Origin"))
-    {
-        // The local FeatureFactory posts server-to-server without an Origin header.
-        // Browser-origin writes through a public tunnel must be explicitly keyed.
-        return Results.Unauthorized();
+        if (string.IsNullOrWhiteSpace(featureUpdateKey) &&
+            !http.Request.Headers.ContainsKey("Origin") &&
+            !IsRemoteRequest(http))
+        {
+            // Allowed local server-to-server posts without a key
+        }
+        else
+        {
+            return Results.Unauthorized();
+        }
     }
 
     if (string.IsNullOrWhiteSpace(feature.Symbol))
@@ -665,12 +732,16 @@ app.MapGet("/api/volprofile/{symbol}", (string symbol) =>
     });
 }).RequireRateLimiting("public-read");
 
-// Retrieve all cached features.
-app.MapGet("/features/all", () =>
+app.MapGet("/features/all", (HttpContext http) =>
 {
     if (publicReadOnly)
     {
         return Results.NotFound();
+    }
+
+    if (!IsAuthorized(http, activeSecurityKey, featureUpdateKey))
+    {
+        return Results.Unauthorized();
     }
 
     return Results.Ok(featureCache.Values);
@@ -683,11 +754,17 @@ app.MapHub<MarketPulseHub>("/hub/marketpulse");     // live Volume Delta + OBI (
 // Endpoint to run the 4 quantitative validation pillars on a background thread and stream progress via SignalR
 app.MapPost("/api/validation/run/{symbol}", (
     string symbol,
+    HttpContext http,
     IHubContext<MarketPulseHub> pulseHub) =>
 {
     if (publicReadOnly)
     {
         return Results.NotFound();
+    }
+
+    if (!IsAuthorized(http, activeSecurityKey, featureUpdateKey))
+    {
+        return Results.Unauthorized();
     }
 
     // Run validation asynchronously in a background thread
