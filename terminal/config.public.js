@@ -1,12 +1,23 @@
 // Public runtime configuration for free static hosting such as Cloudflare Pages.
 // This file is intentionally safe to publish: it contains no secrets and no private MT5 endpoints.
 //
-// The hosted site can auto-detect the same-laptop local bridge on Cloudflare Pages.
-// Add ?local=1 to force local bridge mode while SignalRFeatureStore and FeatureFactory
-// are running on this laptop. Remote visitors remain public read-only.
+// Hosted HTTPS pages cannot reliably connect straight to http://127.0.0.1 because
+// modern browsers block public-to-private network access. For live terminal data,
+// run a secure tunnel to SignalRFeatureStore and open the site with:
+//   ?bridge=https://your-tunnel.trycloudflare.com
+// Optional FeatureFactory tunnel override:
+//   &featureBridge=https://your-feature-tunnel.trycloudflare.com
+const TBBFX_SECURE_BRIDGE = Object.freeze({
+  queryParam: "bridge",
+  featureQueryParam: "featureBridge",
+  storageKey: "tbbfx.secureBridgeUrl",
+  featureStorageKey: "tbbfx.featureBridgeUrl",
+  statusLabel: "SECURE TERMINAL BRIDGE"
+});
+
 const TBBFX_LOCAL_BRIDGE = Object.freeze({
   enabledByQuery: true,
-  autoDetect: true,
+  autoDetect: false,
   queryParam: "local",
   queryValue: "1",
   featureFactoryBase: "http://127.0.0.1:8000",
@@ -30,5 +41,6 @@ window.TBBFX_PUBLIC_CONFIG = Object.freeze({
   signalRMode: "static-readonly",
   signalRBase: "",
   statusLabel: "PUBLIC READ-ONLY",
+  secureBridge: TBBFX_SECURE_BRIDGE,
   localBridge: TBBFX_LOCAL_BRIDGE
 });

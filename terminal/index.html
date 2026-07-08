@@ -723,42 +723,80 @@
   const publicMode = PUBLIC_CONFIG.publicMode !== false;
   const searchParams = new URLSearchParams(window.location.search);
   const localBridgeConfig = PUBLIC_CONFIG.localBridge || {};
+  const secureBridgeConfig = PUBLIC_CONFIG.secureBridge || {};
   const localBridgeParam = localBridgeConfig.queryParam || "local";
   const localBridgeValue = String(localBridgeConfig.queryValue || "1");
-  const localBridgeRequested =
-    publicMode &&
-    localBridgeConfig.enabledByQuery !== false &&
-    searchParams.get(localBridgeParam) === localBridgeValue;
+  const secureBridgeParam = secureBridgeConfig.queryParam || "bridge";
+  const secureFeatureBridgeParam = secureBridgeConfig.featureQueryParam || "featureBridge";
+  const secureBridgeStorageKey = secureBridgeConfig.storageKey || "tbbfx.secureBridgeUrl";
+  const secureFeatureStorageKey = secureBridgeConfig.featureStorageKey || "tbbfx.featureBridgeUrl";
   const hostedPages = /(^|\.)pages\.dev$/i.test(window.location.hostname) ||
     window.location.hostname === "tbbfx-intelligence-web.pages.dev";
-  const localBridgeAuto =
-    publicMode &&
-    localBridgeConfig.autoDetect !== false &&
-    hostedPages;
-  const localBridgeActive = localBridgeRequested || localBridgeAuto;
   const joinUrl = (base, path) => {
     if (!base) return "";
     return String(base).replace(/\/$/, "") + path;
   };
+  const normaliseHttpsUrl = (value) => {
+    const raw = String(value || "").trim().replace(/\/$/, "");
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      return url.protocol === "https:" ? url.origin : "";
+    } catch (_) {
+      return "";
+    }
+  };
+  const readStoredBridge = (key) => {
+    try { return normaliseHttpsUrl(window.localStorage.getItem(key)); }
+    catch (_) { return ""; }
+  };
+  const writeStoredBridge = (key, value) => {
+    if (!value) return;
+    try { window.localStorage.setItem(key, value); } catch (_) {}
+  };
+  const secureBridgeUrl = normaliseHttpsUrl(searchParams.get(secureBridgeParam)) || readStoredBridge(secureBridgeStorageKey);
+  const secureFeatureBridgeUrl = normaliseHttpsUrl(searchParams.get(secureFeatureBridgeParam)) || readStoredBridge(secureFeatureStorageKey) || secureBridgeUrl;
+  writeStoredBridge(secureBridgeStorageKey, secureBridgeUrl);
+  if (secureFeatureBridgeUrl && secureFeatureBridgeUrl !== secureBridgeUrl) writeStoredBridge(secureFeatureStorageKey, secureFeatureBridgeUrl);
+
+  const localBridgeRequested =
+    publicMode &&
+    !secureBridgeUrl &&
+    localBridgeConfig.enabledByQuery !== false &&
+    searchParams.get(localBridgeParam) === localBridgeValue;
+  // Do not auto-connect public HTTPS pages to localhost. Use ?bridge=https://... for a secure tunnel.
+  const localBridgeAuto = false;
+  const secureBridgeActive = Boolean(publicMode && secureBridgeUrl);
+  const localBridgeActive = secureBridgeActive || localBridgeRequested || (!publicMode && !hostedPages);
   const bridgeOrPublic = (bridgeValue, publicValue, fallbackValue = "") =>
     localBridgeActive ? (bridgeValue || fallbackValue) : publicValue;
+  const featureFactoryBase = secureBridgeActive
+    ? secureFeatureBridgeUrl
+    : bridgeOrPublic(localBridgeConfig.featureFactoryBase, PUBLIC_CONFIG.featureFactoryBase, publicMode ? "" : "http://127.0.0.1:8000");
+  const signalRBase = secureBridgeActive ? secureBridgeUrl : "";
+  const validationApiBase = secureBridgeActive
+    ? secureBridgeUrl
+    : bridgeOrPublic(localBridgeConfig.apiBase, PUBLIC_CONFIG.apiBase, publicMode ? "" : "http://127.0.0.1:5000");
 
   const CONFIG = {
-    // Centralized Feature Factory (FastAPI). The public site only connects to
-    // localhost when explicitly opened with ?local=1 on the same laptop.
-    WS_URL: bridgeOrPublic(localBridgeConfig.featureWsUrl, PUBLIC_CONFIG.featureWsUrl, "ws://127.0.0.1:8000/ws/features") || (publicMode ? "" : "ws://127.0.0.1:8000/ws/features"),
+    // Centralized Feature Factory (FastAPI). Public hosted builds only use local live data through a secure HTTPS bridge.
+    WS_URL: secureBridgeActive ? "" : (bridgeOrPublic(localBridgeConfig.featureWsUrl, PUBLIC_CONFIG.featureWsUrl, publicMode ? "" : "ws://127.0.0.1:8000/ws/features") || ""),
     // REST base for on-demand reads (momentum, exposure, greeks, volprofile, macro).
-    API_BASE: bridgeOrPublic(localBridgeConfig.featureFactoryBase, PUBLIC_CONFIG.featureFactoryBase, "http://127.0.0.1:8000") || (publicMode ? "" : "http://127.0.0.1:8000"),
+    API_BASE: featureFactoryBase || "",
     // SignalR URL for C# validation engine and live relay pulses.
-    SIGNALR_URL: bridgeOrPublic(localBridgeConfig.signalRUrl, PUBLIC_CONFIG.signalRUrl || (PUBLIC_CONFIG.signalRBase ? joinUrl(PUBLIC_CONFIG.signalRBase, "/hub/marketpulse") : ""), "http://127.0.0.1:5000/hub/marketpulse") || (publicMode ? "" : "http://127.0.0.1:5000/hub/marketpulse"),
-    SIGNALR_MODE: localBridgeActive ? (localBridgeConfig.signalRMode || "aspnetcore-hub") : (PUBLIC_CONFIG.signalRMode || (publicMode ? "azure-signalr-serverless" : "aspnetcore-hub")),
+    SIGNALR_URL: secureBridgeActive
+      ? joinUrl(signalRBase, "/hub/marketpulse")
+      : (bridgeOrPublic(localBridgeConfig.signalRUrl, PUBLIC_CONFIG.signalRUrl || (PUBLIC_CONFIG.signalRBase ? joinUrl(PUBLIC_CONFIG.signalRBase, "/hub/marketpulse") : ""), publicMode ? "" : "http://127.0.0.1:5000/hub/marketpulse") || ""),
+    SIGNALR_MODE: localBridgeActive ? (localBridgeConfig.signalRMode || "aspnetcore-hub") : (PUBLIC_CONFIG.signalRMode || (publicMode ? "static-readonly" : "aspnetcore-hub")),
     // C# validation run API base. Validation remains disabled in public config unless explicitly enabled.
-    VALIDATION_API_BASE: bridgeOrPublic(localBridgeConfig.apiBase, PUBLIC_CONFIG.apiBase, "http://127.0.0.1:5000") || (publicMode ? sameOrigin : "http://127.0.0.1:5000"),
+    VALIDATION_API_BASE: validationApiBase || "",
     PUBLIC_MODE: publicMode,
     LOCAL_BRIDGE: localBridgeActive,
+    SECURE_BRIDGE: secureBridgeActive,
+    SECURE_BRIDGE_URL: secureBridgeUrl,
     LOCAL_BRIDGE_REQUESTED: localBridgeRequested,
     LOCAL_BRIDGE_AUTO: localBridgeAuto,
-    ALLOW_VALIDATION: localBridgeActive ? localBridgeConfig.allowValidation === true : PUBLIC_CONFIG.allowValidation === true,
+    ALLOW_VALIDATION: secureBridgeActive ? localBridgeConfig.allowValidation === true : (localBridgeRequested ? localBridgeConfig.allowValidation === true : PUBLIC_CONFIG.allowValidation === true),
     ALLOW_TRADING: false,
     // TBBFX traded instruments (mirrors the MAUI app watchlist + MT5 charts).
     SYMBOLS: ["XAUUSD", "USTEC", "US30", "EURUSD", "GBPUSD", "USDJPY"],
@@ -1251,15 +1289,18 @@
     const wsLive = feedStatus.ws;
     const isLive = signalrLive || wsLive;
     const publicReadOnly = (CONFIG.PUBLIC_MODE && !CONFIG.LOCAL_BRIDGE) || source === "public-readonly";
-    const autoFallbackToPublic = CONFIG.LOCAL_BRIDGE_AUTO && !CONFIG.LOCAL_BRIDGE_REQUESTED && !isLive;
+    const autoFallbackToPublic = false;
     const publicStatusLabel = PUBLIC_CONFIG.statusLabel || "PUBLIC READ-ONLY";
-    const bridgeStatusLabel = (PUBLIC_CONFIG.localBridge && PUBLIC_CONFIG.localBridge.statusLabel) || "LOCAL TERMINAL BRIDGE";
+    const secureStatusLabel = (PUBLIC_CONFIG.secureBridge && PUBLIC_CONFIG.secureBridge.statusLabel) || "SECURE TERMINAL BRIDGE";
+    const bridgeStatusLabel = CONFIG.SECURE_BRIDGE
+      ? secureStatusLabel
+      : ((PUBLIC_CONFIG.localBridge && PUBLIC_CONFIG.localBridge.statusLabel) || "LOCAL TERMINAL BRIDGE");
     state.connected = isLive;
     $("online-dot").classList.toggle("sim", !isLive);
     $("online-state").textContent = signalrLive
-      ? (CONFIG.LOCAL_BRIDGE ? "- LOCAL SIGNALR LIVE" : "- LIVE SIGNALR FEED")
+      ? (CONFIG.SECURE_BRIDGE ? "- SECURE SIGNALR LIVE" : (CONFIG.LOCAL_BRIDGE ? "- LOCAL SIGNALR LIVE" : "- LIVE SIGNALR FEED"))
       : wsLive
-        ? (CONFIG.LOCAL_BRIDGE ? "- LOCAL WS LIVE" : "- LIVE WS FEED")
+        ? (CONFIG.SECURE_BRIDGE ? "- SECURE WS LIVE" : (CONFIG.LOCAL_BRIDGE ? "- LOCAL WS LIVE" : "- LIVE WS FEED"))
         : CONFIG.LOCAL_BRIDGE && !autoFallbackToPublic
           ? `- ${bridgeStatusLabel} OFFLINE`
           : publicReadOnly || autoFallbackToPublic
@@ -1339,6 +1380,7 @@
   }
 
   async function fetchLatestSignalRFeature(sym = state.activeSymbol) {
+    if (!CONFIG.VALIDATION_API_BASE) return;
     try {
       const r = await fetch(`${CONFIG.VALIDATION_API_BASE}/features/latest/${sym}`, { cache: "no-store" });
       if (!r.ok) return;

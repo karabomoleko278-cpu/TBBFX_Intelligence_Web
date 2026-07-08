@@ -83,37 +83,74 @@
   function tfRenderCount() { return tfRenderMap[state.timeframe] || tfRenderMap.M5; }
   function runtimeConfig() { return window.TBBFX_PUBLIC_CONFIG || {}; }
   function trimSlash(v) { return String(v || "").replace(/\/$/, ""); }
-  function localBridgeActive() {
-    var cfg = runtimeConfig();
-    var bridge = cfg.localBridge || {};
-    if (cfg.publicMode === false) return false;
-    var param = bridge.queryParam || "local";
-    var value = String(bridge.queryValue || "1");
-    var requested = bridge.enabledByQuery !== false &&
-      new URLSearchParams(window.location.search).get(param) === value;
-    var hostedPages = /(^|\.)pages\.dev$/i.test(window.location.hostname) ||
-      window.location.hostname === "tbbfx-intelligence-web.pages.dev";
-    var auto = bridge.autoDetect !== false && hostedPages;
-    return requested || auto;
+  function normaliseHttpsUrl(value) {
+    var raw = trimSlash(String(value || "").trim());
+    if (!raw) return "";
+    try {
+      var url = new URL(raw);
+      return url.protocol === "https:" ? url.origin : "";
+    } catch (_) {
+      return "";
+    }
+  }
+  function storageGet(key) {
+    try { return normaliseHttpsUrl(window.localStorage.getItem(key)); }
+    catch (_) { return ""; }
+  }
+  function storageSet(key, value) {
+    if (!value) return;
+    try { window.localStorage.setItem(key, value); } catch (_) {}
+  }
+  function secureBridgeConfig() { return runtimeConfig().secureBridge || {}; }
+  function secureBridgeUrl() {
+    var bridge = secureBridgeConfig();
+    var params = new URLSearchParams(window.location.search);
+    var key = bridge.storageKey || "tbbfx.secureBridgeUrl";
+    var url = normaliseHttpsUrl(params.get(bridge.queryParam || "bridge")) || storageGet(key);
+    storageSet(key, url);
+    return url;
+  }
+  function secureFeatureBridgeUrl() {
+    var bridge = secureBridgeConfig();
+    var params = new URLSearchParams(window.location.search);
+    var key = bridge.featureStorageKey || "tbbfx.featureBridgeUrl";
+    var url = normaliseHttpsUrl(params.get(bridge.featureQueryParam || "featureBridge")) || storageGet(key) || secureBridgeUrl();
+    if (url && url !== secureBridgeUrl()) storageSet(key, url);
+    return url;
   }
   function localBridgeConfig() { return runtimeConfig().localBridge || {}; }
+  function explicitLocalBridgeRequested() {
+    var bridge = localBridgeConfig();
+    var param = bridge.queryParam || "local";
+    var value = String(bridge.queryValue || "1");
+    return bridge.enabledByQuery !== false && new URLSearchParams(window.location.search).get(param) === value;
+  }
+  function localBridgeActive() {
+    var cfg = runtimeConfig();
+    if (cfg.publicMode === false) return false;
+    return Boolean(secureBridgeUrl() || explicitLocalBridgeRequested());
+  }
+  function secureBridgeActive() { return Boolean(secureBridgeUrl()); }
 
   function apiBase() {
     var cfg = runtimeConfig();
     var bridge = localBridgeConfig();
-    if (localBridgeActive() && bridge.apiBase) return trimSlash(bridge.apiBase);
+    if (secureBridgeActive()) return secureBridgeUrl();
+    if (explicitLocalBridgeRequested() && bridge.apiBase) return trimSlash(bridge.apiBase);
     if (cfg.apiBase) return trimSlash(cfg.apiBase);
     return window.location.protocol.indexOf("http") === 0 ? window.location.origin : "http://127.0.0.1:5000";
   }
 
   function apiUrl(path) {
-    return apiBase() + path;
+    var base = apiBase();
+    return base ? base + path : "";
   }
 
   function featureFactoryUrl(path) {
     var cfg = runtimeConfig();
     var bridge = localBridgeConfig();
-    if (localBridgeActive()) return trimSlash(bridge.featureFactoryBase || "http://127.0.0.1:8000") + path;
+    if (secureBridgeActive()) return secureFeatureBridgeUrl() + path;
+    if (explicitLocalBridgeRequested()) return trimSlash(bridge.featureFactoryBase || "http://127.0.0.1:8000") + path;
     if (!cfg.featureFactoryBase && cfg.publicMode !== false) return "";
     return trimSlash(cfg.featureFactoryBase || "http://127.0.0.1:8000") + path;
   }
@@ -121,7 +158,8 @@
   function signalRUrl(path) {
     var cfg = runtimeConfig();
     var bridge = localBridgeConfig();
-    if (localBridgeActive() && bridge.signalRUrl) return trimSlash(bridge.signalRUrl);
+    if (secureBridgeActive()) return secureBridgeUrl() + path;
+    if (explicitLocalBridgeRequested() && bridge.signalRUrl) return trimSlash(bridge.signalRUrl);
     if (cfg.signalRUrl) return trimSlash(cfg.signalRUrl);
     if (!cfg.signalRBase && cfg.publicMode !== false) return "";
     return trimSlash(cfg.signalRBase || apiBase()) + path;
@@ -459,7 +497,7 @@
     if (!window.signalR) { setBadge("offline", "LIVE_SIGNAL: SIGNALR CLIENT MISSING - REAL FEED OFFLINE"); return; }
     var hubUrl = signalRUrl("/hub/marketpulse");
     if (!hubUrl) {
-      setBadge("degraded", localBridgeActive() ? "LIVE_SIGNAL: LOCAL BRIDGE OFFLINE - START SIGNALRFEATURESTORE" : "LIVE_SIGNAL: PUBLIC READ-ONLY - LIVE HUB NOT CONFIGURED");
+      setBadge("degraded", localBridgeActive() ? (secureBridgeActive() ? "LIVE_SIGNAL: SECURE BRIDGE OFFLINE - CHECK TUNNEL" : "LIVE_SIGNAL: LOCAL BRIDGE OFFLINE - START SIGNALRFEATURESTORE") : "LIVE_SIGNAL: PUBLIC READ-ONLY - LIVE HUB NOT CONFIGURED");
       return;
     }
 
@@ -477,7 +515,7 @@
     state.connection.onreconnecting(function () { setBadge("degraded", "LIVE_SIGNAL: RECONNECTING ORDER FLOW STREAM"); });
     state.connection.onreconnected(function () { join(state.symbol); setBadge("online", "LIVE_SIGNAL: GAMMA & ORDER FLOW SYNCED"); });
     state.connection.onclose(function () { setBadge("offline", "LIVE_SIGNAL: OFFLINE - REAL ORDER FLOW STREAM DISCONNECTED"); });
-    state.connection.start().then(function () { stopSim(); join(state.symbol); setBadge("online", "LIVE_SIGNAL: GAMMA & ORDER FLOW SYNCED"); }).catch(function () { setBadge("offline", localBridgeActive() ? "LIVE_SIGNAL: LOCAL BRIDGE OFFLINE - CHECK PORT 5000" : "LIVE_SIGNAL: FEATURE STORE OFFLINE - REAL ORDER FLOW UNAVAILABLE"); });
+    state.connection.start().then(function () { stopSim(); join(state.symbol); setBadge("online", secureBridgeActive() ? "LIVE_SIGNAL: SECURE BRIDGE GAMMA & ORDER FLOW SYNCED" : "LIVE_SIGNAL: GAMMA & ORDER FLOW SYNCED"); }).catch(function () { setBadge("offline", localBridgeActive() ? (secureBridgeActive() ? "LIVE_SIGNAL: SECURE BRIDGE OFFLINE - CHECK CLOUDFLARE TUNNEL" : "LIVE_SIGNAL: LOCAL BRIDGE OFFLINE - CHECK PORT 5000") : "LIVE_SIGNAL: FEATURE STORE OFFLINE - REAL ORDER FLOW UNAVAILABLE"); });
   }
 
   function isServerlessSignalR() {

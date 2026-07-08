@@ -185,7 +185,8 @@ static bool IsAllowedTerminalOrigin(string? origin)
 
     return uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) &&
            (uri.Host.Equals("tbbfx-intelligence-web.pages.dev", StringComparison.OrdinalIgnoreCase) ||
-            uri.Host.EndsWith(".tbbfx-intelligence-web.pages.dev", StringComparison.OrdinalIgnoreCase));
+            uri.Host.EndsWith(".tbbfx-intelligence-web.pages.dev", StringComparison.OrdinalIgnoreCase) ||
+            uri.Host.EndsWith(".trycloudflare.com", StringComparison.OrdinalIgnoreCase));
 }
 
 static bool SecureEquals(string? actual, string expected)
@@ -455,6 +456,14 @@ app.MapPost("/features/update", async (
         return Results.Unauthorized();
     }
 
+    if (string.IsNullOrWhiteSpace(featureUpdateKey) &&
+        http.Request.Headers.ContainsKey("Origin"))
+    {
+        // The local FeatureFactory posts server-to-server without an Origin header.
+        // Browser-origin writes through a public tunnel must be explicitly keyed.
+        return Results.Unauthorized();
+    }
+
     if (string.IsNullOrWhiteSpace(feature.Symbol))
     {
         return Results.BadRequest("Symbol is required");
@@ -560,6 +569,100 @@ app.MapGet("/features/latest/{symbol}", (string symbol) =>
     return featureCache.TryGetValue(sym, out var feature)
         ? Results.Ok(feature)
         : Results.NotFound(new { error = $"No features found in cache for symbol: {sym}" });
+}).RequireRateLimiting("public-read");
+
+app.MapGet("/api/momentum/{symbol}", (string symbol) =>
+{
+    var sym = CleanSymbol(symbol);
+    if (!featureCache.TryGetValue(sym, out var feature))
+    {
+        return Results.NotFound(new { error = $"No live momentum found for {sym}" });
+    }
+
+    var obi = Math.Clamp(feature.Obi, -1.0, 1.0);
+    var cvd = Math.Tanh(feature.Cvd / 5000.0);
+    var score = Math.Clamp(50.0 + 50.0 * (0.55 * obi + 0.45 * cvd), 0.0, 100.0);
+    var label = score >= 65 ? "BULLISH" : score <= 35 ? "BEARISH" : "NEUTRAL";
+    return Results.Ok(new { symbol = sym, score, label, source = "signalr_feature_store" });
+}).RequireRateLimiting("public-read");
+
+app.MapGet("/api/macro", () => Results.Ok(new
+{
+    us10y = 4.284,
+    dxy = 103.43,
+    vix = 13.96,
+    es = 5292.0,
+    source = "static_public_macro_snapshot"
+})).RequireRateLimiting("public-read");
+
+app.MapGet("/api/exposure/{symbol}", (string symbol) =>
+{
+    var sym = CleanSymbol(symbol);
+    if (!featureCache.TryGetValue(sym, out var feature))
+    {
+        return Results.NotFound(new { error = $"No live exposure found for {sym}" });
+    }
+
+    var regime = feature.NetGex < 0 ? "NEGATIVE" : "POSITIVE";
+    return Results.Ok(new
+    {
+        symbol = sym,
+        regime,
+        net_gex = feature.NetGex,
+        gamma_flip = feature.GammaFlip,
+        options_proxy = sym,
+        source = "signalr_feature_store"
+    });
+}).RequireRateLimiting("public-read");
+
+app.MapGet("/api/greeks/{symbol}", (string symbol) =>
+{
+    var sym = CleanSymbol(symbol);
+    if (!featureCache.TryGetValue(sym, out var feature))
+    {
+        return Results.NotFound(new { error = $"No live greek proxy found for {sym}" });
+    }
+
+    var dex = Math.Round(Math.Clamp(Math.Tanh(feature.Cvd / 5000.0), -1.0, 1.0), 2);
+    var vex = Math.Round(Math.Clamp(feature.Obi, -1.0, 1.0), 2);
+    var chex = Math.Round(Math.Clamp(feature.NetGex / 100_000_000.0, -1.0, 1.0), 2);
+    return Results.Ok(new { symbol = sym, dex, vex, chex, source = "signalr_feature_store" });
+}).RequireRateLimiting("public-read");
+
+app.MapGet("/api/volprofile/{symbol}", (string symbol) =>
+{
+    var sym = CleanSymbol(symbol);
+    if (!featureCache.TryGetValue(sym, out var feature))
+    {
+        return Results.NotFound(new { error = $"No live volume profile found for {sym}" });
+    }
+
+    var rows = feature.FootprintRows
+        .Where(r => r.Price > 0)
+        .OrderBy(r => r.Price)
+        .ToList();
+    var profile = rows.Count > 0
+        ? rows.Select(r => new { price = r.Price, vol = Math.Max(0, r.BidVolume + r.AskVolume) }).ToArray()
+        : new[] { new { price = feature.Microprice > 0 ? feature.Microprice : feature.Price, vol = Math.Abs(feature.Cvd) + 1.0 } };
+    var low = profile.Min(r => r.price);
+    var high = profile.Max(r => r.price);
+    if (Math.Abs(high - low) < 0.0000001)
+    {
+        var pad = Math.Max(0.0001, Math.Abs(high) * 0.0005);
+        low -= pad;
+        high += pad;
+    }
+
+    return Results.Ok(new
+    {
+        symbol = sym,
+        low,
+        high,
+        has_volume = rows.Count > 0,
+        closes = new[] { feature.Price > 0 ? feature.Price : feature.Microprice, feature.Microprice > 0 ? feature.Microprice : feature.Price },
+        profile,
+        source = "signalr_feature_store"
+    });
 }).RequireRateLimiting("public-read");
 
 // Retrieve all cached features.

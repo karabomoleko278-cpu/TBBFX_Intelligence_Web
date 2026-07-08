@@ -22,8 +22,9 @@ Set the Pages project like this:
 
 Routes included in `terminal/_redirects`:
 
-- `/terminal` serves `TBBFX Intelligence Terminal.html`
-- `/orderflow` serves `orderflow.html`
+- `/terminal` serves `index.html`
+- `/orderflow` serves `orderflow/index.html`
+- `/TBBFX*` serves `index.html` for legacy bookmarked links
 
 Headers included in `terminal/_headers`:
 
@@ -45,6 +46,36 @@ Headers included in `terminal/_headers`:
 - no public SignalR hub endpoint
 
 The hosted terminal can demonstrate the public interface and simulated/read-only analytics without exposing execution controls.
+
+## Secure Live Bridge For Your Own Devices
+
+Cloudflare Pages is public HTTPS, so browsers will not reliably let it talk straight to `http://127.0.0.1:5000` on your laptop. To view your private running terminal data from the hosted site, run a secure tunnel to `SignalRFeatureStore` and open the hosted terminal with the tunnel URL:
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:5000
+```
+
+Then open:
+
+```text
+https://tbbfx-intelligence-web.pages.dev/?bridge=https://YOUR-TUNNEL.trycloudflare.com
+https://tbbfx-intelligence-web.pages.dev/orderflow/?bridge=https://YOUR-TUNNEL.trycloudflare.com
+```
+
+The bridge URL is stored locally in the browser so refreshes keep using it. Use a fresh tunnel URL whenever you restart a quick tunnel.
+
+Optional: if you also expose `FeatureFactory` separately, add `featureBridge`:
+
+```text
+https://tbbfx-intelligence-web.pages.dev/?bridge=https://SIGNALR-TUNNEL.trycloudflare.com&featureBridge=https://FEATUREFACTORY-TUNNEL.trycloudflare.com
+```
+
+Safety rules for live bridge mode:
+
+- Only tunnel sanitized read-only market telemetry.
+- Do not tunnel trade execution endpoints.
+- Do not tunnel MT5 credentials, account details, or private settings.
+- Keep `TBBFX_FEATURE_UPDATE_KEY` configured before allowing browser-origin writes through any public tunnel.
 
 ## What Stays Private
 
