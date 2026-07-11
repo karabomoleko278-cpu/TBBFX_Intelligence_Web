@@ -9,7 +9,12 @@ yfinance
 pandas
 pydantic
 requests
+msgpack
 pytest
+openbb-ai
+sse-starlette
+openbb-technical
+openbb-quantitative
 
 # Optional — enables the Bytewax streaming-dataflow runtime for the feature
 # pipeline. Without it, core/feature_pipeline.py runs an asyncio fallback that

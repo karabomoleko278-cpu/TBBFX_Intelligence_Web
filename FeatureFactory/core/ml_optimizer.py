@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import differential_evolution
 from typing import Dict, List, Tuple, Any, Optional
+from core.openbb_quant import calculate_quant_feature_pack
 
 class ExecutionOptimizer:
     """
@@ -170,9 +171,19 @@ class ExecutionOptimizer:
             wins = np.sum(trade_returns > 0)
             win_rate = wins / len(trade_returns)
             total_profit = np.sum(trade_returns)
+            quant_pack = calculate_quant_feature_pack(
+                trade_returns.tolist(),
+                symbol="OPTIMIZER",
+                route="ml_optimizer.trade_return_quant_features",
+            ).to_dict()
         else:
             win_rate = 0.0
             total_profit = 0.0
+            quant_pack = calculate_quant_feature_pack(
+                [],
+                symbol="OPTIMIZER",
+                route="ml_optimizer.trade_return_quant_features",
+            ).to_dict()
             
         return {
             "weights": list(opt_weights),
@@ -181,6 +192,7 @@ class ExecutionOptimizer:
             "optimized_win_rate": float(win_rate),
             "optimized_profit": float(total_profit),
             "num_trades": int(len(trade_indices)),
+            "quant_feature_pack": quant_pack,
             "message": res.message
         }
 

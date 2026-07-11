@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using MessagePack;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Sockets;
@@ -45,8 +46,10 @@ builder.WebHost.ConfigureKestrel(options =>
     options.ListenAnyIP(configuredPort);
 });
 
-// Add services to the container
-builder.Services.AddSignalR();
+// Add services to the container. MessagePack enables low-latency binary hub frames,
+// while JSON remains available for browser and Cloudflare Pages clients.
+builder.Services.AddSignalR()
+    .AddMessagePackProtocol();
 builder.Services.AddSingleton<OrderflowGammaLevelRefinery>();
 builder.Services.AddCors(options =>
 {
@@ -186,6 +189,11 @@ static string[] ParseAllowedOrigins(string? origins)
 
 static bool IsAllowedTerminalOrigin(string? origin)
 {
+    if (string.IsNullOrEmpty(origin) || origin.Equals("null", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
     if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
     {
         return false;
@@ -222,9 +230,20 @@ static bool IsRemoteRequest(HttpContext context)
     {
         return true;
     }
+
+    var ip = context.Connection.RemoteIpAddress;
+    if (ip != null && !System.Net.IPAddress.IsLoopback(ip))
+    {
+        return true;
+    }
+
     if (context.Request.Headers.TryGetValue("Origin", out var origin) && !string.IsNullOrEmpty(origin))
     {
         var originStr = origin.ToString();
+        if (originStr.Equals("null", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
         if (!originStr.Contains("localhost") && !originStr.Contains("127.0.0.1"))
         {
             return true;
@@ -259,6 +278,81 @@ static bool IsAuthorized(HttpContext context, string activeKey, string? expected
     }
 
     return false;
+}
+
+static bool LooksLikeTbbFxObject(JsonElement payload)
+{
+    return payload.ValueKind == JsonValueKind.Object &&
+           payload.TryGetProperty("results", out _) &&
+           payload.TryGetProperty("provider", out _);
+}
+
+static MarketFeature? DeserializeMarketFeature(JsonElement payload)
+{
+    var featurePayload = payload;
+    if (LooksLikeTbbFxObject(payload) &&
+        payload.TryGetProperty("results", out var results) &&
+        results.ValueKind == JsonValueKind.Array &&
+        results.GetArrayLength() > 0)
+    {
+        featurePayload = results[0];
+    }
+
+    return featurePayload.Deserialize<MarketFeature>(new JsonSerializerOptions(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    });
+}
+
+static async Task<JsonElement?> ReadFeaturePayloadAsync(HttpContext http)
+{
+    try
+    {
+        using var buffer = new MemoryStream();
+        await http.Request.Body.CopyToAsync(buffer);
+        var body = buffer.ToArray();
+        if (body.Length == 0)
+        {
+            return null;
+        }
+
+        var contentType = http.Request.ContentType ?? string.Empty;
+        string json;
+        if (contentType.Contains("application/x-msgpack", StringComparison.OrdinalIgnoreCase) ||
+            contentType.Contains("application/msgpack", StringComparison.OrdinalIgnoreCase))
+        {
+            json = MessagePackSerializer.ConvertToJson(body);
+        }
+        else
+        {
+            json = System.Text.Encoding.UTF8.GetString(body);
+        }
+
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[FeatureUpdate] Failed to decode inbound feature payload: {ex.Message}");
+        return null;
+    }
+}
+
+static object ToTbbFxObject(object payload, string provider, string route, params string[] warnings)
+{
+    return new
+    {
+        id = Guid.NewGuid().ToString("N"),
+        results = new[] { payload },
+        provider,
+        warnings,
+        extra = new
+        {
+            route,
+            timestamp = DateTimeOffset.UtcNow,
+            duration_ns = 0
+        }
+    };
 }
 
 static List<CandleWire> LoadCsvCandles(string symbol)
@@ -504,7 +598,6 @@ app.MapGet("/api/live-scanner/profile", (HttpContext http) =>
 // Endpoint for the Python Centralized Feature Factory to push calculated features.
 app.MapPost("/features/update", async (
     HttpContext http,
-    MarketFeature feature,
     IHubContext<FeatureHub> featureHub,
     IHubContext<MarketPulseHub> pulseHub,
     OrderflowGammaLevelRefinery levelRefinery) =>
@@ -529,6 +622,18 @@ app.MapPost("/features/update", async (
         {
             return Results.Unauthorized();
         }
+    }
+
+    var payload = await ReadFeaturePayloadAsync(http);
+    if (payload is null)
+    {
+        return Results.BadRequest("Invalid or unsupported feature payload encoding");
+    }
+
+    var feature = DeserializeMarketFeature(payload.Value);
+    if (feature is null)
+    {
+        return Results.BadRequest("Invalid feature payload");
     }
 
     if (string.IsNullOrWhiteSpace(feature.Symbol))
@@ -579,7 +684,10 @@ app.MapPost("/features/update", async (
         }
     }
 
-    return Results.Ok(new { message = $"Feature updated for {sym} and broadcast to web + mobile clients." });
+    return Results.Ok(ToTbbFxObject(
+        new { message = $"Feature updated for {sym} and broadcast to web + mobile clients.", symbol = sym },
+        "signalr_feature_store",
+        "features.update"));
 }).RequireRateLimiting("private-write");
 
 app.MapGet("/api/orderflow/levels/{symbol}", (

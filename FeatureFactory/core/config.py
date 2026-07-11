@@ -46,8 +46,13 @@ class Settings:
         # Broker symbol suffix for the live MT5 tick source (Exness uses 'm').
         self.MT5_SYMBOL_SUFFIX: str = os.getenv("MT5_SYMBOL_SUFFIX", "m")
         self.MIN_NOTIONAL: float = float(os.getenv("MIN_NOTIONAL", "100000.0"))
-        self.SIGNALR_URL: str = os.getenv("SIGNALR_URL", "http://localhost:5000/features/update")
+        self.SIGNALR_URL: str = os.getenv("SIGNALR_URL", "http://127.0.0.1:5000/features/update")
+        self.SIGNALR_TIMEOUT_SECONDS: float = float(os.getenv("SIGNALR_TIMEOUT_SECONDS", "2.0"))
+        self.SIGNALR_ERROR_LOG_INTERVAL_SECONDS: float = float(
+            os.getenv("SIGNALR_ERROR_LOG_INTERVAL_SECONDS", "15.0")
+        )
         self.RISK_MAX_ORDER_SIZE: int = int(os.getenv("RISK_MAX_ORDER_SIZE", "1000"))
+        self.TBBFX_FEATURE_UPDATE_KEY: str = os.getenv("TBBFX_FEATURE_UPDATE_KEY", "")
 
         # Free, keyless data only by default. These remain "DEMO_KEY" so no paid
         # provider is ever contacted unless the operator explicitly supplies a key.

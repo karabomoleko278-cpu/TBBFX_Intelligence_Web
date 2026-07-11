@@ -38,7 +38,8 @@
     lastCvd: null,
     lastFeature: null,
     sim: null,
-    resizeTimer: null
+    resizeTimer: null,
+    timezoneOffset: 0
   };
 
   var el = {};
@@ -164,6 +165,13 @@
       url += (url.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(key);
     }
     return url;
+  }
+
+  function unwrapTbbFxObject(payload) {
+    if (payload && Array.isArray(payload.results)) {
+      return payload.results.length === 1 ? payload.results[0] : payload.results;
+    }
+    return payload;
   }
 
   function featureFactoryUrl(path) {
@@ -430,6 +438,7 @@
         if (!r.ok) throw new Error("candle endpoint offline");
         return r.json();
       })
+      .then(unwrapTbbFxObject)
       .finally(function () { if (timer) clearTimeout(timer); });
   }
 
@@ -460,6 +469,18 @@
     if (sym !== state.symbol) return;
     var candles = (payload && payload.candles) || [];
     var parsed = candles.map(normalizeCandle).filter(Boolean).sort(function (a, b) { return a.time - b.time; });
+    
+    // Timezone alignment offset: delta between latest historical candle time and current UTC clock
+    if (parsed.length > 0) {
+      var latestCandleTime = parsed[parsed.length - 1].time;
+      var seconds = tfSeconds();
+      var currentLocalTime = Math.floor(Date.now() / 1000);
+      var currentRounded = Math.floor(currentLocalTime / seconds) * seconds;
+      state.timezoneOffset = latestCandleTime - currentRounded;
+    } else {
+      state.timezoneOffset = 0;
+    }
+
     var enriched = [];
     parsed.forEach(function (bar) { enriched.push(enrichCandle(bar, enriched[enriched.length - 1])); });
     state.bars = enriched;
@@ -508,6 +529,10 @@
 
   function fitChart() {
     if (!state.chart) return;
+    if (state.userScaled) {
+      renderSoon();
+      return;
+    }
     state.manualY = null;
     state.chart.timeScale().fitContent();
     renderSoon();
@@ -571,12 +596,14 @@
   function loadLatest(sym) {
     fetch(apiUrl("/features/latest/" + encodeURIComponent(sym)), { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : null; })
+      .then(unwrapTbbFxObject)
       .then(function (x) { if (x) applyFeature(x); })
       .catch(function () {})
       .then(function () {
         return fetch(apiUrl("/api/orderflow/levels/" + encodeURIComponent(sym)), { cache: "no-store" });
       })
       .then(function (r) { return r && r.ok ? r.json() : []; })
+      .then(unwrapTbbFxObject)
       .then(applyLevels)
       .catch(function () {});
   }
@@ -598,6 +625,7 @@
   }
 
   function applyFeature(raw) {
+    raw = unwrapTbbFxObject(raw);
     var f = normFeature(raw || {}); if (f.symbol !== state.symbol) return;
     var price = f.microprice || f.price || state.price;
     if (!state.hasLiveAnchor && shouldRebaseToLive(price, f.symbol)) rebaseToLiveAnchor(price, f.symbol);
@@ -605,7 +633,7 @@
     var previous = state.lastCvd; var delta = previous === null ? 0 : f.cvd - previous;
     state.lastCvd = f.cvd; state.price = price; state.lastFeature = f;
     var seconds = tfSeconds();
-    var chartTime = Math.floor(f.timestamp / seconds) * seconds;
+    var chartTime = Math.floor(f.timestamp / seconds) * seconds + (state.timezoneOffset || 0);
     var lastBar = state.bars[state.bars.length - 1];
     var rows = f.rows.length ? f.rows : synthRows(price, delta, f.obi, f.symbol);
     if (!lastBar || chartTime > lastBar.time) {
@@ -634,7 +662,10 @@
     var sym = String(any(raw, ["symbol", "Symbol"], state.symbol)).toUpperCase(); if (sym !== state.symbol) return;
     var cvd = Number(any(raw, ["cumulativeDelta", "CumulativeDelta"], state.lastCvd || 0)) || 0;
     var instant = Number(any(raw, ["instantaneousDelta", "InstantaneousDelta"], 0)) || 0;
-    if (el["cvd-value"]) el["cvd-value"].textContent = signed(cvd, 1);
+    if (el["cvd-value"]) {
+      el["cvd-value"].textContent = signed(cvd, 1);
+      el["cvd-value"].classList.toggle("negative", cvd < 0);
+    }
     if (el["vol-delta"]) el["vol-delta"].innerHTML = fmt(Math.abs(instant), 0) + " (" + compact(instant) + ")";
   }
 
@@ -707,9 +738,21 @@
     if (el["momentum-label"]) el["momentum-label"].textContent = momentum >= 58 ? "Bullish" : momentum <= 42 ? "Bearish" : "Neutral";
     if (el["momentum-ring"]) el["momentum-ring"].style.background = "radial-gradient(circle at center, rgba(9,20,14,.96) 52%, transparent 54%), conic-gradient(" + (momentum >= 50 ? "var(--neon)" : "var(--red)") + " 0deg " + (momentum * 3.6) + "deg, rgba(216,238,224,.12) " + (momentum * 3.6) + "deg 360deg)";
 
-    if (el["cvd-value"]) el["cvd-value"].textContent = signed(f.cvd !== undefined ? f.cvd : bar.cvd, 1);
-    if (el["cvd-bias"]) { var bull = (f.cvd !== undefined ? f.cvd : bar.cvd) >= 0; el["cvd-bias"].textContent = bull ? "Bullish" : "Bearish"; el["cvd-bias"].classList.toggle("bearish", !bull); }
-    if (el["cvd-bar"]) el["cvd-bar"].style.width = clamp(50 + Math.tanh(((f.cvd !== undefined ? f.cvd : bar.cvd) || 0) / 3000) * 42, 8, 95) + "%";
+    var cvdVal = f.cvd !== undefined ? f.cvd : bar.cvd;
+    var negCvd = cvdVal < 0;
+    if (el["cvd-value"]) {
+      el["cvd-value"].textContent = signed(cvdVal, 1);
+      el["cvd-value"].classList.toggle("negative", negCvd);
+    }
+    if (el["cvd-bias"]) {
+      var bull = cvdVal >= 0;
+      el["cvd-bias"].textContent = bull ? "Bullish" : "Bearish";
+      el["cvd-bias"].classList.toggle("bearish", !bull);
+    }
+    if (el["cvd-bar"]) {
+      el["cvd-bar"].style.width = clamp(50 + Math.tanh((cvdVal || 0) / 3000) * 42, 8, 95) + "%";
+      el["cvd-bar"].classList.toggle("negative", negCvd);
+    }
     book(f.depth, price, prof); priceLines(price);
   }
 

@@ -1,8 +1,9 @@
-"""Offline end-to-end check of the agent loop + Decide/Transform gateways.
+"""Offline check of the OpenBB governance agent + immutable risk gateways.
 
 Run: python -m tests.verify_agent_flow  (from the FeatureFactory directory)
-Network-free: the yfinance-backed data fetch is stubbed.
+Network-free: the GEX/SVI telemetry fetch is stubbed.
 """
+
 import asyncio
 import os
 import sys
@@ -11,62 +12,97 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import core.governance_agent as g
 from core.config import settings
-from google_antigravity.sdk.models import ToolCall, TurnContext
 
-# Deterministic, offline market data (negative-gamma scenario).
-g.fetch_local_gex_data = lambda s: {"underlying_price": 525.0, "gamma_flip": 523.4, "net_gex": -8.2e8}
+
+def _stub_analyze(symbol: str, persist: bool = False):
+    return {
+        "ticker": symbol,
+        "underlying_price": 525.0,
+        "gamma_flip": 523.4,
+        "net_gex": -8.2e8,
+        "regime": "NEGATIVE",
+        "dex": 0.35,
+        "vex": 0.20,
+        "chex": -0.05,
+    }
+
+
+g._telemetry_engine.analyze = _stub_analyze
+
+
+class _StubPortfolioRiskEngine:
+    def calculate_symbol_var(self, symbol: str):
+        return {
+            "symbol": symbol,
+            "status": "insufficient_data",
+            "var_99_zar": 0.0,
+            "var_99_fraction": 0.0,
+            "exceeds_max_variance": False,
+            "warnings": [],
+        }
+
+
+g._portfolio_risk_engine = _StubPortfolioRiskEngine()
+
+
+async def _no_mcp_payload(symbol: str):
+    return None
+
+
+g._fetch_mcp_market_payload = _no_mcp_payload
 
 
 async def main() -> int:
-    gk = g.TradingRiskGatekeeper()
-    cap = settings.RISK_MAX_ORDER_SIZE
-    ceiling = cap * gk.HARD_CEILING_MULTIPLE
-    print("cap={}  hard_ceiling={}".format(cap, ceiling))
-
     failures = []
 
-    # Decide: authorized + in-range size is allowed.
-    d = await gk.decide(TurnContext(), ToolCall("submit_execution_order", {"symbol": "SPY", "quantity": 500}))
-    print("SPY/500   decide.allowed={}".format(d.allowed))
-    if not d.allowed:
-        failures.append("SPY/500 should be allowed")
+    allowed = g.risk_decide(g.RiskGatewayRequest(symbol="XAUUSD", proposed_risk_pct=0.15, target_r=4.0))
+    print(f"XAUUSD/0.15 decide.allowed={allowed.allowed}")
+    if not allowed.allowed:
+        failures.append("XAUUSD at immutable 15% risk should be allowed")
 
-    # Decide: unauthorized symbol is blocked.
-    d = await gk.decide(TurnContext(), ToolCall("submit_execution_order", {"symbol": "GME", "quantity": 100}))
-    print("GME/100   decide.allowed={}  reason={!r}".format(d.allowed, d.reason))
-    if d.allowed:
-        failures.append("GME should be blocked (unauthorized)")
+    percent_notation = g.risk_decide(g.RiskGatewayRequest(symbol="EURUSD", proposed_risk_pct=15))
+    print(f"EURUSD/15 decide.allowed={percent_notation.allowed}")
+    if not percent_notation.allowed:
+        failures.append("EURUSD should accept 15 as percent notation for immutable 15%")
 
-    # Decide: grossly oversized is blocked.
-    d = await gk.decide(TurnContext(), ToolCall("submit_execution_order", {"symbol": "SPY", "quantity": ceiling + 1}))
-    print("SPY oversized decide.allowed={}  reason={!r}".format(d.allowed, d.reason))
-    if d.allowed:
-        failures.append("oversized should be blocked")
+    blocked_risk = g.risk_decide(g.RiskGatewayRequest(symbol="XAUUSD", proposed_risk_pct=0.20))
+    print(f"XAUUSD/0.20 decide.allowed={blocked_risk.allowed} reason={blocked_risk.reason!r}")
+    if blocked_risk.allowed:
+        failures.append("XAUUSD attempted 20% override should be blocked")
 
-    # Transform: clamps to the cap.
-    t = await gk.transform(TurnContext(), ToolCall("submit_execution_order", {"symbol": "SPY", "quantity": 2500}))
-    print("SPY/2500  transform -> {}".format(t.arguments["quantity"]))
-    if t.arguments["quantity"] != cap:
-        failures.append("transform should clamp 2500 -> {}".format(cap))
+    blocked_symbol = g.risk_decide(g.RiskGatewayRequest(symbol="GME", proposed_risk_pct=0.15))
+    print(f"GME decide.allowed={blocked_symbol.allowed} reason={blocked_symbol.reason!r}")
+    if blocked_symbol.allowed:
+        failures.append("GME should be blocked because it is not in the sanctioned watchlist")
 
-    # Full agent turn: read tool -> Decide -> Transform -> structured output.
-    resp = await g.create_market_intelligence_agent().run("assess SPY", symbol="SPY")
-    a = resp.structured_output
-    executed = resp.executed_order.arguments["quantity"] if resp.executed_order else None
-    print("FULL TURN: {} regime={} stance={} blocked={} executed={}".format(
-        a.ticker, a.volatility_regime, a.recommended_execution_stance, resp.blocked, executed))
-    if a.volatility_regime != "NEGATIVE":
-        failures.append("regime should be NEGATIVE for net_gex<0")
-    if resp.blocked:
-        failures.append("SPY/2500 full turn should clear Decide and be clamped, not blocked")
-    if executed != cap:
-        failures.append("executed order should be clamped to cap")
+    transformed = g.risk_transform(g.RiskGatewayRequest(symbol="GBPUSD", proposed_risk_pct=12, quantity=2500))
+    print(f"GBPUSD transform.allowed={transformed.allowed} normalized_quantity={transformed.normalized_quantity}")
+    if transformed.normalized_quantity != int(settings.RISK_MAX_ORDER_SIZE):
+        failures.append(f"transform should clamp 2500 -> {settings.RISK_MAX_ORDER_SIZE}")
+
+    tools = g.governance_tool_definitions()
+    print(f"OpenBB tool definitions={len(tools)}")
+    if len(tools) != 8:
+        failures.append("expected Decide/Transform plus six read-only MCP tool definitions")
+
+    assessment = await g.execute_agent_assessment("XAUUSD")
+    print(
+        "assessment ticker={} regime={} stance={} momentum={}".format(
+            assessment.ticker,
+            assessment.volatility_regime,
+            assessment.recommended_execution_stance,
+            assessment.composite_momentum_score,
+        )
+    )
+    if assessment.volatility_regime != "NEGATIVE":
+        failures.append("stubbed net_gex<0 should produce NEGATIVE regime")
 
     if failures:
         print("\nFAILURES:")
-        for f in failures:
-            print("  - " + f)
+        for failure in failures:
+            print(f"  - {failure}")
         return 1
+
     print("\nALL CHECKS PASSED")
     return 0
 

@@ -74,7 +74,7 @@
       position: relative;
       z-index: 1;
       min-height: 100vh;
-      padding-left: 72px;
+      padding-left: 0;
     }
 
     .side-rail {
@@ -156,9 +156,7 @@
       top: 0;
       z-index: 3;
       height: 78px;
-      display: grid;
-      grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1.4fr) auto;
-      gap: 24px;
+      display: flex;
       align-items: center;
       padding: 0 28px;
       border-bottom: 1px solid rgba(40, 255, 156, 0.13);
@@ -884,6 +882,11 @@
       text-shadow: 0 0 26px rgba(40, 255, 156, 0.22);
     }
 
+    .cvd-value.negative {
+      color: #ff7c75;
+      text-shadow: 0 0 26px rgba(239, 89, 80, 0.22);
+    }
+
     .cvd-meter {
       height: 10px;
       border-radius: 100px;
@@ -897,6 +900,10 @@
       height: 100%;
       background: linear-gradient(90deg, rgba(40, 255, 156, 0.48), var(--neon-2));
       transition: width 220ms ease;
+    }
+
+    .cvd-meter span.negative {
+      background: linear-gradient(90deg, rgba(239, 89, 80, 0.58), #ff766d);
     }
 
     .book-mid {
@@ -1135,20 +1142,7 @@
   </style>
 </head>
 <body>
-  <aside class="side-rail" aria-label="Workspace navigation">
-    <div class="rail-mark">X</div>
-    <div class="rail-icons">
-      <div class="rail-icon">##</div>
-      <div class="rail-icon">() </div>
-      <div class="rail-icon">[]</div>
-      <div class="rail-icon active">||</div>
-      <div class="rail-icon">~</div>
-    </div>
-    <div class="rail-bottom">
-      <span>?</span>
-      <span>&gt;_</span>
-    </div>
-  </aside>
+
 
   <div class="shell">
     <header class="topbar">
@@ -1158,18 +1152,6 @@
           <h1>TBBFX <b>INTELLIGENCE</b></h1>
           <small>Gamma grid - orderflow execution</small>
         </div>
-      </div>
-
-      <nav class="nav" aria-label="Terminal sections">
-        <a href="/" data-preserve-query="true">Live Feed</a>
-        <a href="/#validation" data-preserve-query="true">Validation</a>
-        <a href="/orderflow/" class="active" data-preserve-query="true">Order Flow</a>
-      </nav>
-
-      <div class="top-actions">
-        <div class="search"><span>?</span><span>CMD_EXPLORE...</span></div>
-        <button class="trade-button" type="button" disabled title="Public terminal is read-only. MT5 execution stays private.">READ_ONLY</button>
-        <div class="icon-actions"><span>GEAR</span><span>BELL</span><span>USER</span></div>
       </div>
     </header>
 

@@ -5,6 +5,7 @@ import random
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from core.config import settings
+from core.tbbfx_object import make_microstructure_object, pack_tbbfx_object, tbbfx_msgpack_headers
 
 # Attempt to import MetaTrader 5 (only works on Windows with MT5 terminal installed)
 try:
@@ -12,6 +13,15 @@ try:
     MT5_AVAILABLE = True
 except ImportError:
     MT5_AVAILABLE = False
+
+
+def _post_feature_envelope(url: str, envelope: Any, headers: Dict[str, str], timeout: float):
+    """Send binary MessagePack first, with JSON fallback for legacy local stores."""
+    binary_headers = tbbfx_msgpack_headers(headers)
+    response = requests.post(url, data=pack_tbbfx_object(envelope), headers=binary_headers, timeout=timeout)
+    if response.status_code in (400, 415):
+        response = requests.post(url, json=envelope.to_dict(), headers=headers, timeout=timeout)
+    return response
 
 class StreamProcessor:
     def __init__(self, symbol: str = "EURUSD", mt5_symbol: str = None):
@@ -33,6 +43,7 @@ class StreamProcessor:
 
         # Keep track of last processed tick time to avoid duplicate processing
         self.last_tick_time: int = 0
+        self._last_error_time: float = 0.0
 
         # State for the quote-only tick-rule order-flow proxy (retail FX/CFD).
         self._prev_mid: float = None
@@ -273,12 +284,31 @@ class StreamProcessor:
                 "depth": self.depth
             }
             # Async-like POST to avoid blocking the main stream loop
-            resp = requests.post(settings.SIGNALR_URL, json=payload, timeout=0.5)
+            headers = {}
+            feature_key = getattr(settings, "TBBFX_FEATURE_UPDATE_KEY", "")
+            if feature_key:
+                headers["X-TBBFX-FEATURE-KEY"] = feature_key
+            envelope = make_microstructure_object(
+                payload,
+                provider="mt5_exness" if MT5_AVAILABLE else "stream_simulator",
+                route="stream_processor.features_update",
+            )
+            resp = _post_feature_envelope(
+                settings.SIGNALR_URL,
+                envelope,
+                headers,
+                settings.SIGNALR_TIMEOUT_SECONDS,
+            )
             if resp.status_code != 200:
                 pass
         except Exception as e:
-            # Fail silently to avoid interrupting stream loop
-            print(f"[StreamProcessor] Error pushing to feature store: {e}")
+            # Rate-limited error logging to avoid flooding the console
+            now = time.time()
+            if now - self._last_error_time >= settings.SIGNALR_ERROR_LOG_INTERVAL_SECONDS:
+                self._last_error_time = now
+                print(
+                    f"[StreamProcessor] Error pushing to feature store (logged every {settings.SIGNALR_ERROR_LOG_INTERVAL_SECONDS}s): {e}"
+                )
 
 
     async def run_loop(self):

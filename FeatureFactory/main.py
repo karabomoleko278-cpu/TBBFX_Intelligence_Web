@@ -7,12 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from core.math_greeks import fetch_local_gex_data
 from core.stream_processor import StreamProcessor
-from core.governance_agent import execute_agent_assessment, MicrostructureAssessment
+from core.governance_agent import execute_agent_assessment, MicrostructureAssessment, router as governance_router
 from core.options_exposure_engine import OptionsExposureEngine
 from core.state_db import get_state_db
 from core.ml_optimizer import ExecutionOptimizer
 from core.momentum import MomentumScorer, label_for
 from core.config import settings
+from core.query_params import EmptyQuery, GovernanceQuery, MarketDataQuery, OptimizationQuery
+from core.router_extensions import tbbfx_router_command
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -41,6 +43,8 @@ app.add_middleware(
     allow_headers=["*"],
     allow_private_network=True,
 )
+
+app.include_router(governance_router)
 
 # Background task and stream processor references
 stream_tasks: Dict[str, asyncio.Task] = {}
@@ -222,6 +226,7 @@ def _momentum_for(symbol: str) -> Dict[str, Any]:
     result["monitored"] = proc is not None
     return result
 
+
 @app.on_event("startup")
 async def startup_event():
     """Initializes real-time streaming tasks on startup."""
@@ -290,28 +295,26 @@ def read_root():
     }
 
 @app.get("/api/exposure/{symbol}")
+@tbbfx_router_command(query_model=MarketDataQuery, provider="options_exposure_engine", route="api.exposure")
 def get_options_exposure(symbol: str):
-    """Net GEX per strike, the Gamma Flip price and the SVI smile — persisted to the local DB."""
+    """Net GEX per strike, the Gamma Flip price and the SVI smile - persisted to the local DB."""
     sym = symbol.upper()
-    try:
-        return exposure_engine.analyze(sym)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch exposure metrics: {str(e)}")
+    return exposure_engine.analyze(sym)
 
 @app.get("/api/scan")
+@tbbfx_router_command(query_model=EmptyQuery, provider="options_exposure_engine", route="api.scan")
 def scan_watchlist():
     """Runs the automated gamma-flip scanner across the configured watchlist."""
-    try:
-        return {"scanned": settings.WATCHLIST, "results": exposure_engine.scan_watchlist(settings.WATCHLIST)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+    return {"scanned": settings.WATCHLIST, "results": exposure_engine.scan_watchlist(settings.WATCHLIST)}
 
 @app.get("/api/history/gex/{symbol}")
+@tbbfx_router_command(query_model=MarketDataQuery, provider="sqlite_state_db", route="api.history.gex")
 def get_gex_history(symbol: str, limit: int = 200):
     """Historical GEX / gamma-flip snapshots preserved across restarts."""
     return {"symbol": symbol.upper(), "history": db.get_gex_history(symbol.upper(), limit=limit)}
 
 @app.get("/api/svi/{symbol}")
+@tbbfx_router_command(query_model=MarketDataQuery, provider="sqlite_state_db", route="api.svi")
 def get_svi_params(symbol: str):
     """Most-recent persisted SVI volatility parameters for a symbol."""
     params = db.get_latest_svi_parameters(symbol.upper())
@@ -320,51 +323,39 @@ def get_svi_params(symbol: str):
     return params
 
 @app.post("/api/optimize")
+@tbbfx_router_command(query_model=OptimizationQuery, provider="ml_optimizer", route="api.optimize")
 def run_optimization(symbol: str = None):
     """Runs the ML execution optimizer over persisted training data."""
-    try:
-        return optimizer.optimize_from_store(db, ticker=symbol.upper() if symbol else None)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Optimization failed: {str(e)}")
+    return optimizer.optimize_from_store(db, ticker=symbol.upper() if symbol else None)
 
-@app.post("/api/assessment/{symbol}", response_model=MicrostructureAssessment)
+@app.post("/api/assessment/{symbol}")
+@tbbfx_router_command(query_model=GovernanceQuery, provider="openbb_governance_agent", route="api.assessment")
 async def get_agent_assessment(symbol: str):
-    """Triggers the Google Antigravity Agent to run a microstructure assessment."""
+    """Triggers the governance agent to run a read-only microstructure assessment."""
     sym = symbol.upper()
-    try:
-        assessment = await execute_agent_assessment(sym)
-        # Calculate a mock composite momentum score locally based on recent values
-        # score = w_gex * S_gex + w_delta * S_delta + w_squeeze * S_squeeze + ...
-        # (Inside assessment, our mock sdk outputs realistic values)
-        return assessment
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent execution failed: {str(e)}")
+    return await execute_agent_assessment(sym)
 
 @app.get("/api/features/{symbol}")
+@tbbfx_router_command(query_model=MarketDataQuery, provider="stream_processor", route="api.features")
 def get_latest_microstructure_features(symbol: str):
     """Gets the current OBI, CVD, and Microprice features directly from memory."""
     sym = symbol.upper()
     if sym not in processors:
         raise HTTPException(status_code=404, detail=f"Symbol {sym} is not currently monitored in streams.")
-        
+
     proc = processors[sym]
     return {
         "symbol": sym,
         "cvd": proc.cvd,
         "microprice": proc.microprice,
         "obi": proc.obi,
-        "footprint_count": len(proc.footprint)
+        "footprint_count": len(proc.footprint),
     }
 
 @app.get("/api/candles/{symbol}/{timeframe}")
+@tbbfx_router_command(query_model=MarketDataQuery, provider="market_data_router", route="api.candles")
 def get_candles(symbol: str, timeframe: str, count: int = 240):
-    """Real per-symbol OHLC candles for the order-flow workspace.
-
-    Primary source is the connected MT5 terminal, so the web terminal uses the
-    same broker candles as the operator's trading account. If MT5 is unavailable
-    we return the latest exported historical CSV as a clearly-labelled fallback
-    instead of letting the frontend fabricate a generic chart.
-    """
+    """Real per-symbol OHLC candles for the order-flow workspace."""
     sym = _clean_symbol(symbol)
     tf = timeframe.upper().replace("1H", "H1").replace("4H", "H4").replace("1D", "D1").replace("1W", "W1")
     if tf not in _TF_SECONDS:
@@ -390,14 +381,15 @@ def get_candles(symbol: str, timeframe: str, count: int = 240):
             "authentic": True,
             "stale": True,
             "candles": csv_rows[-limit:],
+            "warnings": [f"MT5 candles unavailable for {sym} {tf}; using exported CSV history."],
         }
 
     raise HTTPException(status_code=404, detail=f"No candle history available for {sym} {tf}")
 
 @app.get("/api/momentum")
+@tbbfx_router_command(query_model=EmptyQuery, provider="momentum_scorer", route="api.momentum")
 def get_market_momentum():
-    """Market-wide Composite Market Momentum (terminal panel 2B.3): the average
-    of the per-symbol composite scores across all monitored watchlist symbols."""
+    """Market-wide Composite Market Momentum (terminal panel 2B.3)."""
     per_symbol = [_momentum_for(sym) for sym in processors.keys()]
     if not per_symbol:
         base = momentum_scorer.score("MARKET")
@@ -414,51 +406,44 @@ def get_market_momentum():
     }
 
 @app.get("/api/momentum/{symbol}")
+@tbbfx_router_command(query_model=MarketDataQuery, provider="momentum_scorer", route="api.momentum.symbol")
 def get_symbol_momentum(symbol: str):
-    """Per-symbol Composite Market Momentum (0-100) from live CVD/OBI + the
-    latest persisted GEX lean. Consumed by the MAUI BiasGrid momentum column."""
+    """Per-symbol Composite Market Momentum from live CVD/OBI + persisted GEX lean."""
     return _momentum_for(symbol)
 
 @app.get("/api/greeks/{symbol}")
+@tbbfx_router_command(query_model=MarketDataQuery, provider="options_exposure_engine", route="api.greeks")
 def get_greek_exposures(symbol: str):
-    """Real per-symbol higher-order greek exposure — DEX/VEX/CHEX, each in
-    [-1, 1] — aggregated from the same free options chain the GEX uses
-    (terminal panel 2B.2). Massive options can replace the source later."""
+    """Real per-symbol higher-order greek exposure - DEX/VEX/CHEX."""
     sym = symbol.upper()
-    try:
-        a = exposure_engine.analyze(sym)
-        return {
-            "symbol": sym,
-            "options_proxy": a.get("options_proxy", sym),
-            "dex": a.get("dex", 0.0),
-            "vex": a.get("vex", 0.0),
-            "chex": a.get("chex", 0.0),
-            "dte": a.get("dte"),
-            "timestamp": a.get("timestamp"),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Greeks fetch failed: {str(e)}")
+    a = exposure_engine.analyze(sym)
+    return {
+        "symbol": sym,
+        "options_proxy": a.get("options_proxy", sym),
+        "dex": a.get("dex", 0.0),
+        "vex": a.get("vex", 0.0),
+        "chex": a.get("chex", 0.0),
+        "dte": a.get("dte"),
+        "timestamp": a.get("timestamp"),
+    }
 
 @app.get("/api/volprofile/{symbol}")
+@tbbfx_router_command(query_model=MarketDataQuery, provider="options_exposure_engine", route="api.volprofile")
 def get_volume_profile(symbol: str, buckets: int = 26):
-    """Real volume-by-price profile + recent closes for the active symbol
-    (Massive FX/metal aggregates when entitled, else yfinance proxy) — terminal
-    liquidity heatmap 2A.1."""
-    try:
-        return exposure_engine.volume_profile(symbol.upper(), buckets=buckets)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Volume profile failed: {str(e)}")
+    """Real volume-by-price profile + recent closes for the active symbol."""
+    return exposure_engine.volume_profile(symbol.upper(), buckets=buckets)
 
 @app.get("/api/macro")
+@tbbfx_router_command(query_model=EmptyQuery, provider="macro_router", route="api.macro")
 def get_macro():
-    """Real macro context for the terminal header — US 10-year treasury yield
-    from Massive when entitled, else null (header keeps its prior value)."""
+    """Real macro context for the terminal header."""
     from core import massive
     y10 = massive.latest_treasury_10y()
     return {
         "us10y": y10,
         "source": "massive" if y10 is not None else "unavailable",
         "timestamp": time.time(),
+        "warnings": [] if y10 is not None else ["10Y treasury source unavailable; frontend may retain prior value."],
     }
 
 # ==========================================

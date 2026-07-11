@@ -17,11 +17,14 @@ The class is safe to share between the FastAPI event loop and the background
 stream/scan tasks: ``check_same_thread=False`` plus a single write lock.
 """
 
+import hashlib
 import os
 import json
 import sqlite3
 import threading
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -98,6 +101,19 @@ class StateDatabase:
                     success     INTEGER,
                     message     TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS governance_audit_trail (
+                    transaction_id            TEXT PRIMARY KEY,
+                    timestamp                 TEXT NOT NULL,
+                    symbol                    TEXT NOT NULL,
+                    action_taken              TEXT NOT NULL,
+                    data_lineage_source       TEXT NOT NULL,
+                    active_trade_parameters   TEXT,
+                    execution_telemetry       TEXT,
+                    cryptographic_state_hash  TEXT NOT NULL UNIQUE
+                );
+                CREATE INDEX IF NOT EXISTS ix_governance_audit_symbol_ts
+                    ON governance_audit_trail (symbol, timestamp DESC);
                 """
             )
             self._conn.commit()
@@ -177,6 +193,51 @@ class StateDatabase:
                 (ticker.upper(), limit),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_price_series(self, ticker: str, limit: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Return ascending price observations for portfolio risk analytics.
+
+        Real spot values from GEX snapshots are preferred. If the store has no
+        spot history yet, a compact synthetic series is reconstructed from
+        recorded forward returns so VaR requests degrade gracefully.
+        """
+        ticker = ticker.upper()
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT ts, spot FROM (
+                       SELECT ts, spot
+                       FROM gex_snapshots
+                       WHERE ticker=? AND spot IS NOT NULL AND spot > 0
+                       ORDER BY ts DESC
+                       LIMIT ?
+                   ) ORDER BY ts ASC""",
+                (ticker, limit),
+            ).fetchall()
+
+        if rows:
+            return [
+                {"ts": float(r["ts"]), "price": float(r["spot"]), "source": "gex_snapshots"}
+                for r in rows
+            ]
+
+        _, returns, timestamps = self.load_training_matrix(ticker, limit=limit)
+        if len(returns) == 0:
+            return []
+
+        price = 1.0
+        reconstructed: List[Dict[str, Any]] = []
+        for ts, ret in zip(timestamps, returns):
+            if np.isfinite(ret):
+                price *= max(0.000001, 1.0 + float(ret))
+                reconstructed.append(
+                    {
+                        "ts": float(ts),
+                        "price": float(price),
+                        "source": "training_samples_reconstructed",
+                    }
+                )
+        return reconstructed
 
     # ------------------------------------------------------------------
     # Training samples (ML core)
@@ -299,6 +360,130 @@ class StateDatabase:
         except (ValueError, TypeError):
             pass
         return out
+
+    # ------------------------------------------------------------------
+    # Cryptographic governance audit ledger
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _canonical_json(value: Optional[Dict[str, Any]]) -> str:
+        return json.dumps(value or {}, sort_keys=True, separators=(",", ":"), default=str)
+
+    @classmethod
+    def compute_governance_state_hash(
+        cls,
+        timestamp: str,
+        symbol: str,
+        action_taken: str,
+        data_lineage_source: str,
+        active_trade_parameters: Optional[Dict[str, Any]] = None,
+        execution_telemetry: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        payload = "|".join(
+            [
+                timestamp,
+                symbol.upper(),
+                action_taken,
+                data_lineage_source,
+                cls._canonical_json(active_trade_parameters),
+                cls._canonical_json(execution_telemetry),
+            ]
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def record_governance_audit(
+        self,
+        symbol: str,
+        action_taken: str,
+        data_lineage_source: str,
+        active_trade_parameters: Optional[Dict[str, Any]] = None,
+        execution_telemetry: Optional[Dict[str, Any]] = None,
+        timestamp: Optional[str] = None,
+        transaction_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        timestamp = timestamp or datetime.now(timezone.utc).isoformat()
+        transaction_id = transaction_id or str(uuid.uuid4())
+        symbol = symbol.upper()
+        active_json = self._canonical_json(active_trade_parameters)
+        telemetry_json = self._canonical_json(execution_telemetry)
+        state_hash = self.compute_governance_state_hash(
+            timestamp,
+            symbol,
+            action_taken,
+            data_lineage_source,
+            active_trade_parameters,
+            execution_telemetry,
+        )
+
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO governance_audit_trail
+                   (transaction_id, timestamp, symbol, action_taken, data_lineage_source,
+                    active_trade_parameters, execution_telemetry, cryptographic_state_hash)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    transaction_id,
+                    timestamp,
+                    symbol,
+                    action_taken,
+                    data_lineage_source,
+                    active_json,
+                    telemetry_json,
+                    state_hash,
+                ),
+            )
+            self._conn.commit()
+
+        return {
+            "transaction_id": transaction_id,
+            "timestamp": timestamp,
+            "symbol": symbol,
+            "action_taken": action_taken,
+            "data_lineage_source": data_lineage_source,
+            "cryptographic_state_hash": state_hash,
+        }
+
+    def verify_governance_audit_integrity(self, limit: Optional[int] = 1000) -> Dict[str, Any]:
+        args: List[Any] = []
+        sql = "SELECT * FROM governance_audit_trail ORDER BY timestamp DESC"
+        if limit:
+            sql += " LIMIT ?"
+            args.append(int(limit))
+
+        with self._lock:
+            rows = self._conn.execute(sql, args).fetchall()
+
+        invalid_records: List[Dict[str, Any]] = []
+        for row in rows:
+            active_params = json.loads(row["active_trade_parameters"] or "{}")
+            telemetry = json.loads(row["execution_telemetry"] or "{}")
+            expected = self.compute_governance_state_hash(
+                row["timestamp"],
+                row["symbol"],
+                row["action_taken"],
+                row["data_lineage_source"],
+                active_params,
+                telemetry,
+            )
+            if expected != row["cryptographic_state_hash"]:
+                invalid_records.append(
+                    {
+                        "transaction_id": row["transaction_id"],
+                        "symbol": row["symbol"],
+                        "timestamp": row["timestamp"],
+                        "expected_hash": expected,
+                        "stored_hash": row["cryptographic_state_hash"],
+                    }
+                )
+
+        total = len(rows)
+        invalid = len(invalid_records)
+        return {
+            "status": "empty" if total == 0 else ("valid" if invalid == 0 else "tampered"),
+            "total_checked": total,
+            "valid_count": total - invalid,
+            "invalid_count": invalid,
+            "invalid_records": invalid_records,
+        }
 
     # ------------------------------------------------------------------
     def close(self) -> None:

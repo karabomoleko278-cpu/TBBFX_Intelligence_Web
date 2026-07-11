@@ -37,6 +37,7 @@ import requests
 from core.config import settings
 from core.stream_processor import StreamProcessor
 from core.state_db import get_state_db
+from core.tbbfx_object import make_microstructure_object, pack_tbbfx_object, tbbfx_msgpack_headers
 
 try:
     from bytewax.dataflow import Dataflow
@@ -53,6 +54,15 @@ except ImportError:  # pragma: no cover - exercised only when bytewax is absent
 # ----------------------------------------------------------------------
 _processors: Dict[str, StreamProcessor] = {}
 _processor_thread: threading.Thread | None = None
+
+
+def _post_feature_envelope(url: str, envelope: Any, headers: Dict[str, str], timeout: float):
+    """Send binary MessagePack first, with JSON fallback for legacy local stores."""
+    binary_headers = tbbfx_msgpack_headers(headers)
+    response = requests.post(url, data=pack_tbbfx_object(envelope), headers=binary_headers, timeout=timeout)
+    if response.status_code in (400, 415):
+        response = requests.post(url, json=envelope.to_dict(), headers=headers, timeout=timeout)
+    return response
 
 
 def _footprint_rows(proc: StreamProcessor, anchor_price: float, limit: int = 32) -> List[Dict[str, float]]:
@@ -128,7 +138,21 @@ def _snapshot(symbols: List[str]) -> List[Dict[str, Any]]:
 def _ship_to_online_cache(record: Dict[str, Any]) -> None:
     """POST one feature record to the SignalR online feature cache."""
     try:
-        requests.post(settings.SIGNALR_URL, json=record, timeout=0.5)
+        headers = {}
+        feature_key = getattr(settings, "TBBFX_FEATURE_UPDATE_KEY", "")
+        if feature_key:
+            headers["X-TBBFX-FEATURE-KEY"] = feature_key
+        envelope = make_microstructure_object(
+            record,
+            provider="bytewax_feature_pipeline" if BYTEWAX_AVAILABLE else "async_feature_pipeline",
+            route="feature_pipeline.online_cache",
+        )
+        _post_feature_envelope(
+            settings.SIGNALR_URL,
+            envelope,
+            headers,
+            settings.SIGNALR_TIMEOUT_SECONDS,
+        )
     except Exception:  # noqa: BLE001 - never let a transient network error kill the stream
         pass
 
