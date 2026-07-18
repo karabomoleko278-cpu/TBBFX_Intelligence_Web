@@ -1,0 +1,180 @@
+{
+  "schema_version": "1.0",
+  "model_context": "TBBFX AI REFINERY // MECHANICAL REGIME ALPHA",
+  "system_mode": "PUBLIC READ-ONLY MONITOR",
+  "regime_logic": "TRAINED SYSTEM SYMBOL PARAMETERS // HARD LOCKED",
+  "parameter_state": "TRAINED_IMMUTABLE_PARAMETER_LOCKED",
+  "snapshot_type": "HISTORICAL_OUT_OF_SAMPLE_VALIDATION",
+  "currency": "ZAR",
+  "source": {
+    "artifact": "walkforward_25000_all_six_mixed_risk_production_locked_pf_20260630.txt",
+    "sha256": "F3D07D7027358A1CFDFB42A77FA1CA5D653E7A76FBF26C1ABF5773A86A22FD0A",
+    "captured_date": "2026-06-30",
+    "provider": "immutable_validation_snapshot"
+  },
+  "disclaimer": "Historical out-of-sample results are informational and do not guarantee future performance. This public endpoint cannot execute validation jobs or modify trained parameters.",
+  "symbols": {
+    "EURUSD": {
+      "metrics": {
+        "cumulative_alpha_zar": 5917.19,
+        "net_profit_zar": 5917.19,
+        "expectancy_zar": 295.86,
+        "profit_factor": 1.83,
+        "win_rate_pct": 30.00,
+        "max_drawdown_pct": 28.76,
+        "trades": 20
+      },
+      "trained_parameters": {
+        "confluence": 3,
+        "cooldown_minutes": 100,
+        "ema_fast": 8,
+        "ema_mid": 21,
+        "ema_slow": 100,
+        "stop_atr_multiplier": 1.5,
+        "target_r": 3.0,
+        "atr_min_multiplier": 1.0,
+        "fvg_multiplier": 1.0,
+        "break_even_r": 1.0,
+        "session_profile": 0,
+        "bias_profile": 0,
+        "day_profile": 2,
+        "walkforward_ratio": 65
+      }
+    },
+    "GBPUSD": {
+      "metrics": {
+        "cumulative_alpha_zar": 8247.77,
+        "net_profit_zar": 8247.77,
+        "expectancy_zar": 201.17,
+        "profit_factor": 1.86,
+        "win_rate_pct": 21.95,
+        "max_drawdown_pct": 51.58,
+        "trades": 41
+      },
+      "trained_parameters": {
+        "confluence": 2,
+        "cooldown_minutes": 60,
+        "ema_fast": 8,
+        "ema_mid": 21,
+        "ema_slow": 200,
+        "stop_atr_multiplier": 3.5,
+        "target_r": 3.0,
+        "atr_min_multiplier": 1.0,
+        "fvg_multiplier": 1.0,
+        "break_even_r": 1.0,
+        "session_profile": 5,
+        "bias_profile": 0,
+        "day_profile": 2,
+        "walkforward_ratio": 65
+      }
+    },
+    "XAUUSD": {
+      "metrics": {
+        "cumulative_alpha_zar": 22362.03,
+        "net_profit_zar": 22362.03,
+        "expectancy_zar": 438.47,
+        "profit_factor": 2.03,
+        "win_rate_pct": 29.41,
+        "max_drawdown_pct": 25.28,
+        "trades": 51
+      },
+      "trained_parameters": {
+        "confluence": 3,
+        "cooldown_minutes": 120,
+        "ema_fast": 8,
+        "ema_mid": 21,
+        "ema_slow": 100,
+        "stop_atr_multiplier": 2.5,
+        "target_r": 4.0,
+        "atr_min_multiplier": 1.0,
+        "fvg_multiplier": 1.0,
+        "break_even_r": 2.0,
+        "session_profile": 0,
+        "bias_profile": 0,
+        "day_profile": 0,
+        "walkforward_ratio": 65
+      }
+    },
+    "US30": {
+      "metrics": {
+        "cumulative_alpha_zar": 15559.97,
+        "net_profit_zar": 15559.97,
+        "expectancy_zar": 288.15,
+        "profit_factor": 2.36,
+        "win_rate_pct": 18.52,
+        "max_drawdown_pct": 22.78,
+        "trades": 54
+      },
+      "trained_parameters": {
+        "confluence": 2,
+        "cooldown_minutes": 45,
+        "ema_fast": 8,
+        "ema_mid": 21,
+        "ema_slow": 200,
+        "stop_atr_multiplier": 3.0,
+        "target_r": 4.0,
+        "atr_min_multiplier": 1.0,
+        "fvg_multiplier": 1.0,
+        "break_even_r": 0.5,
+        "session_profile": 0,
+        "bias_profile": 0,
+        "day_profile": 0,
+        "walkforward_ratio": 65
+      }
+    },
+    "USTEC": {
+      "metrics": {
+        "cumulative_alpha_zar": 8880.55,
+        "net_profit_zar": 8880.55,
+        "expectancy_zar": 555.03,
+        "profit_factor": 4.95,
+        "win_rate_pct": 18.75,
+        "max_drawdown_pct": 44.91,
+        "trades": 16
+      },
+      "trained_parameters": {
+        "confluence": 3,
+        "cooldown_minutes": 45,
+        "ema_fast": 8,
+        "ema_mid": 21,
+        "ema_slow": 160,
+        "stop_atr_multiplier": 3.0,
+        "target_r": 4.0,
+        "atr_min_multiplier": 1.0,
+        "fvg_multiplier": 1.0,
+        "break_even_r": 0.6,
+        "session_profile": 0,
+        "bias_profile": 0,
+        "day_profile": 0,
+        "walkforward_ratio": 65
+      }
+    },
+    "USDJPY": {
+      "metrics": {
+        "cumulative_alpha_zar": 13664.42,
+        "net_profit_zar": 13664.42,
+        "expectancy_zar": 369.31,
+        "profit_factor": 1.78,
+        "win_rate_pct": 29.73,
+        "max_drawdown_pct": 26.65,
+        "trades": 37
+      },
+      "trained_parameters": {
+        "confluence": 3,
+        "cooldown_minutes": 90,
+        "ema_fast": 8,
+        "ema_mid": 21,
+        "ema_slow": 100,
+        "stop_atr_multiplier": 1.5,
+        "target_r": 4.0,
+        "atr_min_multiplier": 1.0,
+        "fvg_multiplier": 1.0,
+        "break_even_r": 1.5,
+        "session_profile": 3,
+        "bias_profile": 0,
+        "day_profile": 0,
+        "walkforward_ratio": 65
+      }
+    }
+  }
+}

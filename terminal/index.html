@@ -751,8 +751,55 @@
 
   <!-- ===================== QUANTITATIVE VALIDATION BOARD ===================== -->
   <div id="validation-view-container" style="display: none; padding: var(--gap); min-height: calc(100vh - 180px); flex-direction: column; gap: var(--gap);">
+    <!-- Public deployments expose signed-off historical scorecards only. -->
+    <section id="public-validation-scorecard" class="panel" style="display:none; width:100%; flex-shrink:0; overflow:hidden;">
+      <div class="panel-head" style="min-height:52px;">
+        <span class="badge">LOCK</span>
+        <h2>Trained System Validation Record</h2>
+        <div class="right" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+          <span class="subtag" id="public-val-symbol">XAUUSD</span>
+          <span class="subtag" style="color:var(--neon); border-color:rgba(28,229,155,.45);">READ ONLY</span>
+        </div>
+      </div>
+      <div class="panel-body" style="display:grid; gap:14px; background:radial-gradient(circle at 88% 0%, rgba(28,229,155,.08), transparent 35%), var(--panel);">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px;">
+          <div style="padding:16px; border:1px solid var(--border); border-radius:8px; background:var(--panel-inset);">
+            <div id="validation-public-mode" style="font-family:var(--mono); font-size:10px; letter-spacing:.12em; color:var(--neon);">SYSTEM MODE: PUBLIC READ-ONLY MONITOR</div>
+            <div id="validation-regime-logic" style="margin-top:8px; font-size:18px; line-height:1.2; font-weight:800; color:var(--text-1);">REGIME LOGIC: TRAINED SYSTEM SYMBOL PARAMETERS // HARD LOCKED</div>
+            <div id="validation-model-context" style="margin-top:9px; font-family:var(--mono); font-size:10px; color:var(--text-dim);">TBBFX AI REFINERY // MECHANICAL REGIME ALPHA</div>
+          </div>
+          <div style="padding:16px; border:1px solid rgba(28,229,155,.35); border-radius:8px; background:linear-gradient(135deg, rgba(28,229,155,.08), rgba(0,0,0,.15));">
+            <div style="font-size:9px; letter-spacing:.13em; color:var(--text-dim);">PARAMETER STATE</div>
+            <div id="validation-parameter-state" style="margin-top:8px; font-family:var(--mono); font-size:12px; line-height:1.45; color:var(--neon); overflow-wrap:anywhere;">TRAINED_IMMUTABLE_PARAMETER_LOCKED</div>
+            <div style="margin-top:10px; font-size:10px; color:var(--text-2);">No execution, optimization, mutation, or account-control capability is exposed here.</div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:10px;">
+          <div class="chip" style="display:block; padding:12px; background:var(--panel-inset); border:1px solid var(--border);"><div class="subtag">Cumulative Alpha</div><div id="public-val-alpha" class="num" style="font-size:20px; margin-top:7px; color:var(--neon);">--</div></div>
+          <div class="chip" style="display:block; padding:12px; background:var(--panel-inset); border:1px solid var(--border);"><div class="subtag">Profit Factor</div><div id="public-val-pf" class="num" style="font-size:20px; margin-top:7px;">--</div></div>
+          <div class="chip" style="display:block; padding:12px; background:var(--panel-inset); border:1px solid var(--border);"><div class="subtag">Win Rate</div><div id="public-val-wr" class="num" style="font-size:20px; margin-top:7px;">--</div></div>
+          <div class="chip" style="display:block; padding:12px; background:var(--panel-inset); border:1px solid var(--border);"><div class="subtag">Max Drawdown</div><div id="public-val-dd" class="num" style="font-size:20px; margin-top:7px; color:var(--amber);">--</div></div>
+          <div class="chip" style="display:block; padding:12px; background:var(--panel-inset); border:1px solid var(--border);"><div class="subtag">OOS Trades</div><div id="public-val-trades" class="num" style="font-size:20px; margin-top:7px;">--</div></div>
+          <div class="chip" style="display:block; padding:12px; background:var(--panel-inset); border:1px solid var(--border);"><div class="subtag">Expectancy</div><div id="public-val-expectancy" class="num" style="font-size:20px; margin-top:7px;">--</div></div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px;">
+          <div style="padding:14px; border:1px solid var(--border); border-radius:8px; background:var(--panel-inset);">
+            <div class="subtag" style="margin-bottom:10px;">Fixed Trained Parameters</div>
+            <div id="public-val-parameters" style="display:flex; flex-wrap:wrap; gap:7px;"><span class="subtag">Loading immutable snapshot...</span></div>
+          </div>
+          <div style="padding:14px; border:1px solid var(--border); border-radius:8px; background:var(--panel-inset);">
+            <div id="validation-scorecard-status" style="font-family:var(--mono); font-size:10px; color:var(--neon);">SYNCHRONIZING SIGNED-OFF RECORD</div>
+            <div id="public-val-source" style="margin-top:8px; font-family:var(--mono); font-size:9px; color:var(--text-dim); overflow-wrap:anywhere;">Awaiting source lineage...</div>
+            <div id="public-val-disclaimer" style="margin-top:9px; font-size:9px; line-height:1.45; color:var(--text-faint);">Historical out-of-sample data is informational and does not guarantee future performance.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- CONTROL PANEL -->
-    <section class="panel" style="width: 100%; flex-shrink: 0;">
+    <section id="validation-private-controls" class="panel" style="width: 100%; flex-shrink: 0;">
       <div class="panel-head">
         <span class="badge">CTRL</span>
         <h2>Quantitative Validation Suite</h2>
@@ -784,7 +831,7 @@
     </section>
 
     <!-- CHARTS GRID -->
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); flex: none;">
+    <div id="validation-private-charts" style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); flex: none;">
       <!-- STEP 1: PARAMETER STABILITY HEATMAP -->
       <section class="panel">
         <div class="panel-head">
@@ -1459,6 +1506,9 @@
     fetchLatestSignalRFeature(sym);
     if (state.activeView === "macro" && window.TBBFXMacroMap) {
       window.TBBFXMacroMap.refresh(sym);
+    }
+    if (state.activeView === "validation" && CONFIG.PUBLIC_MODE) {
+      refreshPublicValidationScorecard(sym);
     }
   }
 
@@ -2244,6 +2294,164 @@
     }
   }
 
+  const VALIDATION_PARAMETER_LABELS = Object.freeze({
+    confluence: "Confluence Floor",
+    cooldown_minutes: "Cooldown",
+    ema_fast: "EMA Fast",
+    ema_mid: "EMA Mid",
+    ema_slow: "EMA Slow",
+    stop_atr_multiplier: "SL ATR",
+    target_r: "Target R",
+    atr_min_multiplier: "ATR Minimum",
+    fvg_multiplier: "FVG Multiplier",
+    break_even_r: "Break-Even R",
+    session_profile: "Session Profile",
+    bias_profile: "Bias Profile",
+    day_profile: "Day Profile",
+    walkforward_ratio: "WF Robustness"
+  });
+
+  let publicValidationRequestId = 0;
+
+  function formatZar(value) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return "--";
+    return `R ${amount.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function resetPublicValidationMetrics() {
+    for (const id of [
+      "public-val-alpha",
+      "public-val-pf",
+      "public-val-wr",
+      "public-val-dd",
+      "public-val-trades",
+      "public-val-expectancy"
+    ]) {
+      const element = $(id);
+      if (element) element.textContent = "--";
+    }
+  }
+
+  function configureValidationPresentation() {
+    const publicScorecard = $("public-validation-scorecard");
+    const privateControls = $("validation-private-controls");
+    const privateCharts = $("validation-private-charts");
+    if (publicScorecard) publicScorecard.style.display = CONFIG.PUBLIC_MODE ? "block" : "none";
+    if (privateControls) privateControls.style.display = CONFIG.PUBLIC_MODE ? "none" : "block";
+    if (privateCharts) privateCharts.style.display = CONFIG.PUBLIC_MODE ? "none" : "grid";
+  }
+
+  function renderValidationParameters(parameters) {
+    const target = $("public-val-parameters");
+    if (!target) return;
+    target.replaceChildren();
+
+    const entries = Object.entries(parameters || {});
+    if (!entries.length) {
+      const empty = document.createElement("span");
+      empty.className = "subtag";
+      empty.textContent = "No signed-off parameters available";
+      target.appendChild(empty);
+      return;
+    }
+
+    for (const [key, rawValue] of entries) {
+      const item = document.createElement("span");
+      item.className = "subtag";
+      item.style.borderColor = "rgba(28,229,155,.28)";
+      item.style.color = "var(--text-2)";
+      let value = rawValue;
+      if (key === "cooldown_minutes") value = `${rawValue} min`;
+      if (key === "walkforward_ratio") value = `${rawValue}%`;
+      item.textContent = `${VALIDATION_PARAMETER_LABELS[key] || key}: ${value}`;
+      target.appendChild(item);
+    }
+  }
+
+  async function refreshPublicValidationScorecard(symbol = state.activeSymbol) {
+    if (!CONFIG.PUBLIC_MODE) return;
+    const requestId = ++publicValidationRequestId;
+    const normalizedSymbol = String(symbol || "XAUUSD").toUpperCase();
+    const status = $("validation-scorecard-status");
+    const source = $("public-val-source");
+    const parameterTarget = $("public-val-parameters");
+
+    if ($("public-val-symbol")) $("public-val-symbol").textContent = normalizedSymbol;
+    resetPublicValidationMetrics();
+    if (status) {
+      status.textContent = "SYNCHRONIZING SIGNED-OFF RECORD";
+      status.style.color = "var(--neon)";
+    }
+
+    if (!CONFIG.API_BASE) {
+      if (status) {
+        status.textContent = "PUBLIC DATA GATEWAY NOT CONFIGURED";
+        status.style.color = "var(--amber)";
+      }
+      if (source) source.textContent = "Configure the named HTTPS FeatureFactory gateway in config.public.js or open with ?featureBridge=https://your-gateway.";
+      if (parameterTarget) {
+        parameterTarget.replaceChildren();
+        const warning = document.createElement("span");
+        warning.className = "subtag";
+        warning.textContent = "Read-only snapshot unavailable until the secure gateway is online";
+        parameterTarget.appendChild(warning);
+      }
+      return;
+    }
+
+    try {
+      const validationClient = window.TBBFXMacroMap?.fetchValidationScorecard;
+      let snapshot;
+      if (typeof validationClient === "function") {
+        snapshot = await validationClient(normalizedSymbol);
+      } else {
+        const endpoint = `${CONFIG.API_BASE.replace(/\/$/, "")}/api/macro/validation-suite?symbol=${encodeURIComponent(normalizedSymbol)}`;
+        const response = await fetch(appendKey(endpoint), {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store"
+        });
+        if (!response.ok) throw new Error(`Validation gateway returned ${response.status}`);
+        snapshot = unwrapTbbFxObject(await response.json());
+      }
+      if (requestId !== publicValidationRequestId || normalizedSymbol !== state.activeSymbol) return;
+      if (!snapshot || !snapshot.scorecard || !snapshot.scorecard.metrics) throw new Error("Validation snapshot was incomplete");
+
+      const metrics = snapshot.scorecard.metrics;
+      $("public-val-alpha").textContent = formatZar(metrics.cumulative_alpha_zar);
+      $("public-val-pf").textContent = Number(metrics.profit_factor).toFixed(2);
+      $("public-val-wr").textContent = `${Number(metrics.win_rate_pct).toFixed(2)}%`;
+      $("public-val-dd").textContent = `${Number(metrics.max_drawdown_pct).toFixed(2)}%`;
+      $("public-val-trades").textContent = String(metrics.trades);
+      $("public-val-expectancy").textContent = formatZar(metrics.expectancy_zar);
+      renderValidationParameters(snapshot.scorecard.trained_parameters);
+
+      if ($("validation-public-mode")) $("validation-public-mode").textContent = `SYSTEM MODE: ${snapshot.system_mode}`;
+      if ($("validation-regime-logic")) $("validation-regime-logic").textContent = `REGIME LOGIC: ${snapshot.regime_logic}`;
+      if ($("validation-model-context")) $("validation-model-context").textContent = snapshot.model_context;
+      if ($("validation-parameter-state")) $("validation-parameter-state").textContent = snapshot.parameter_state;
+      if (source) {
+        const artifact = snapshot.source?.artifact || "signed-off validation artifact";
+        const hash = String(snapshot.source?.sha256 || "");
+        source.textContent = `SOURCE: ${artifact} // SHA-256 ${hash ? hash.slice(0, 16) + "..." : "UNAVAILABLE"}`;
+      }
+      if ($("public-val-disclaimer")) $("public-val-disclaimer").textContent = snapshot.disclaimer;
+      if (status) {
+        status.textContent = "SIGNED-OFF HISTORICAL RECORD VERIFIED";
+        status.style.color = "var(--neon)";
+      }
+    } catch (error) {
+      if (requestId !== publicValidationRequestId) return;
+      console.warn("Public validation scorecard unavailable:", error);
+      if (status) {
+        status.textContent = "READ-ONLY SNAPSHOT TEMPORARILY UNAVAILABLE";
+        status.style.color = "var(--amber)";
+      }
+      if (source) source.textContent = "The secure validation gateway could not be reached. No private compute or fallback simulation was started.";
+    }
+  }
+
   async function runValidation(symbol) {
     const btn = $("val-run-btn");
     if (!CONFIG.ALLOW_VALIDATION || !CONFIG.VALIDATION_API_BASE) {
@@ -2284,6 +2492,7 @@
     resizeCanvas(); seedGrid(); drawHeatmap();
     seedObi(); renderGreeks(); setRegime(true);
     renderMomentum(57, "NEUTRAL");
+    configureValidationPresentation();
 
     // Wire the symbol command bar → decoupled per-asset routing.
     const bar = $("symbolbar");
@@ -2306,6 +2515,7 @@
         if (validationContainer) validationContainer.style.display = "flex";
         if (macroContainer) macroContainer.style.display = "none";
         $("val-symbol-label").textContent = "Active Symbol: " + state.activeSymbol;
+        if (CONFIG.PUBLIC_MODE) refreshPublicValidationScorecard(state.activeSymbol);
       } else if (view === "macro") {
         if (liveContainer) liveContainer.style.display = "none";
         if (validationContainer) validationContainer.style.display = "none";

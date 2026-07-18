@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import csv
+import ipaddress
 import math
 import time
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
@@ -43,6 +44,7 @@ from core.query_params import (
     MacroEconomicQuery,
     MarketDataQuery,
     OptimizationQuery,
+    ValidationSuiteQuery,
 )
 from core.router_extensions import tbbfx_router_command
 from core.rate_limiter import (
@@ -53,6 +55,7 @@ from core.rate_limiter import (
     resolve_forwarded_ip,
 )
 from core.tbbfx_object import make_tbbfx_object, pack_tbbfx_object, to_transport_dict
+from core.validation_suite import get_validation_suite_snapshot
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -87,6 +90,71 @@ public_rate_limiter = TbbFxIpRateLimiter(
     window_seconds=60,
 )
 
+_PUBLIC_TERMINAL_ORIGINS = {
+    "https://tbbfx-intelligence-web.pages.dev",
+}
+
+
+def _is_private_peer(request: Request) -> bool:
+    if request.client is None:
+        return False
+    if request.client.host.strip().lower() in {"localhost", "testclient"}:
+        return True
+    try:
+        return ipaddress.ip_address(request.client.host).is_private or ipaddress.ip_address(
+            request.client.host
+        ).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_public_gateway_request(request: Request) -> bool:
+    """Identify public ingress without weakening local operator workflows."""
+    if request.headers.get("x-tbbfx-public-gateway", "").strip() == "1":
+        return True
+
+    origin = request.headers.get("origin", "").strip().lower().rstrip("/")
+    if origin in _PUBLIC_TERMINAL_ORIGINS:
+        return True
+    if origin.endswith(".tbbfx-intelligence-web.pages.dev"):
+        return True
+
+    # A direct non-private connection is treated as public even if a proxy
+    # marker is missing. Localhost/private-LAN development remains interactive.
+    return not _is_private_peer(request)
+
+
+def _public_read_only_denial(request: Request) -> Response:
+    envelope = make_tbbfx_object(
+        [],
+        provider="feature_factory_security",
+        route="security.public_read_only",
+        warnings=["The public monitor accepts read-only GET and HEAD requests only."],
+        extra={
+            "status": 403,
+            "system_mode": "PUBLIC READ-ONLY MONITOR",
+            "attempted_method": request.method,
+        },
+    )
+    headers = {
+        "Cache-Control": "private, no-store",
+        "CDN-Cache-Control": "no-store",
+        "X-TBBFX-System-Mode": "public-read-only",
+        "Vary": "Accept, Origin",
+    }
+    if "application/x-msgpack" in request.headers.get("accept", "").lower():
+        return Response(
+            content=pack_tbbfx_object(envelope),
+            status_code=403,
+            media_type="application/x-msgpack",
+            headers=headers,
+        )
+    return JSONResponse(
+        content=to_transport_dict(envelope),
+        status_code=403,
+        headers=headers,
+    )
+
 
 def _merge_vary_header(response: Response, value: str) -> None:
     current = {item.strip() for item in response.headers.get("Vary", "").split(",") if item.strip()}
@@ -97,6 +165,10 @@ def _merge_vary_header(response: Response, value: str) -> None:
 @app.middleware("http")
 async def production_gateway_guardrails(request: Request, call_next):
     """Apply the final per-IP limit and explicit CDN cache contract."""
+    is_public_gateway = _is_public_gateway_request(request)
+    if is_public_gateway and request.method not in {"GET", "HEAD"}:
+        return _public_read_only_denial(request)
+
     decision = None
     if request.method not in {"HEAD", "OPTIONS"} and is_public_market_path(request.url.path):
         client_ip = resolve_client_ip(request)
@@ -137,6 +209,8 @@ async def production_gateway_guardrails(request: Request, call_next):
     _merge_vary_header(response, "Accept")
     _merge_vary_header(response, "Origin")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    if is_public_gateway:
+        response.headers["X-TBBFX-System-Mode"] = "public-read-only"
 
     if decision is not None:
         response.headers["X-RateLimit-Limit"] = str(decision.limit)
@@ -790,6 +864,18 @@ async def get_macro_calendar(
         country=country,
         limit=limit,
     )
+
+
+@app.get("/api/macro/validation-suite")
+@tbbfx_router_command(
+    query_model=ValidationSuiteQuery,
+    provider="immutable_validation_snapshot",
+    route="api.macro.validation_suite",
+    messagepack=True,
+)
+def get_macro_validation_suite(request: Request, symbol: str):
+    """Return a public, historical OOS scorecard with no execution capability."""
+    return get_validation_suite_snapshot(symbol)
 
 
 @app.get("/api/macro/geopolitical-feed")

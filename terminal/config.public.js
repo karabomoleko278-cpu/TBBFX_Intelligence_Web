@@ -1,10 +1,10 @@
 // Public runtime configuration for free static hosting such as Cloudflare Pages.
 // This file is intentionally safe to publish: it contains no secrets and no private MT5 endpoints.
 //
-// Hosted HTTPS pages cannot reliably connect straight to http://127.0.0.1 because
-// modern browsers block public-to-private network access. For live terminal data,
-// run a secure tunnel to SignalRFeatureStore and open the site with:
-//   ?bridge=https://your-tunnel.trycloudflare.com
+// Hosted HTTPS pages use the read-only Cloudflare Worker/VPC gateway below.
+// Private execution credentials and state-changing methods never cross this route.
+// An explicit bridge query remains available for authenticated operator sessions:
+//   ?bridge=https://your-secure-operator-bridge.example
 // Optional FeatureFactory tunnel override:
 //   &featureBridge=https://your-feature-tunnel.trycloudflare.com
 const TBBFX_SECURE_BRIDGE = Object.freeze({
@@ -34,12 +34,15 @@ const isLocal = window.location.hostname === "localhost" ||
                 window.location.hostname === "127.0.0.1" || 
                 window.location.protocol === "file:";
 
+const TBBFX_PUBLIC_API_BASE =
+  "https://tbbfx-production-api.karabomoleko278.workers.dev";
+
 window.TBBFX_PUBLIC_CONFIG = Object.freeze({
   publicMode: !isLocal,
   allowTrading: isLocal,
   allowValidation: isLocal,
-  apiBase: "",
-  featureFactoryBase: "",
+  apiBase: TBBFX_PUBLIC_API_BASE,
+  featureFactoryBase: TBBFX_PUBLIC_API_BASE,
   featureWsUrl: "",
   signalRUrl: "",
   signalRMode: isLocal ? "aspnetcore-hub" : "static-readonly",

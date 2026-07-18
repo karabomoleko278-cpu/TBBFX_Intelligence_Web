@@ -96,6 +96,20 @@ class OptimizationQuery(QueryParams):
         return symbol
 
 
+class ValidationSuiteQuery(QueryParams):
+    """Read-only lookup for an immutable historical validation snapshot."""
+
+    symbol: str = Field(..., min_length=3, max_length=16)
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        symbol = _clean_symbol(value)
+        if symbol not in settings.WATCHLIST:
+            raise ValueError(f"{symbol} is not in the immutable TBBFX watchlist")
+        return symbol
+
+
 class MacroEconomicQuery(QueryParams):
     """Validated read-only macro calendar filters for the Macro Map."""
 

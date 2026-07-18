@@ -48,10 +48,10 @@ when a secret has already been pushed.
 The production launcher starts:
 
 - one stateful SignalR feature store on port 5000;
-- one FeatureFactory stream leader on port 8000;
-- one macro replica on port 8001;
-- one stateless API replica on port 8002;
-- Nginx on loopback port 8080 using least-connections load balancing;
+- one FeatureFactory stream leader on port 8100;
+- one macro replica on port 8101;
+- one stateless API replica on port 8102;
+- Nginx on loopback port 8787 using least-connections load balancing;
 - an optional named Cloudflare Tunnel to the Nginx gateway.
 
 Only the leader starts live stream processors. This avoids duplicate MT5 stream

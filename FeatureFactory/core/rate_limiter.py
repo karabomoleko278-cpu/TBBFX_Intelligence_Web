@@ -105,6 +105,7 @@ _LOW_FREQUENCY_CACHE_PATHS = {
     "/api/macro/liquidity-index",
     "/api/macro/cot-positioning",
     "/api/macro/yield-curve",
+    "/api/macro/validation-suite",
 }
 
 _HIGH_FREQUENCY_CACHE_PATHS = {

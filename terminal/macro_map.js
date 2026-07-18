@@ -140,8 +140,13 @@
   const activeSymbol = () => (document.querySelector(".symbol-tab.active")?.textContent || DEFAULT_SYMBOL).trim().toUpperCase();
 
   function apiUrl(path) {
-    const base = (config.apiBaseUrl || "").replace(/\/$/, "");
+    const base = (config.apiBaseUrl || config.apiBase || "").replace(/\/$/, "");
     return `${base}${path}`;
+  }
+
+  function securedApiUrl(path) {
+    const url = apiUrl(path);
+    return typeof config.appendKey === "function" ? config.appendKey(url) : url;
   }
 
   async function decodeResponse(response) {
@@ -167,12 +172,27 @@
   }
 
   async function fetchMacroEndpoint(path) {
-    const response = await fetch(apiUrl(path), {
+    const response = await fetch(securedApiUrl(path), {
       headers: apiHeaders(),
       cache: "no-store"
     });
     if (!response.ok) throw new Error(`Macro endpoint failed: ${response.status}`);
     return unwrapEnvelope(await decodeResponse(response));
+  }
+
+  async function fetchValidationScorecard(symbol = activeSymbol()) {
+    const normalizedSymbol = String(symbol || DEFAULT_SYMBOL).trim().toUpperCase();
+    if (!SYMBOLS.includes(normalizedSymbol)) {
+      throw new Error(`Unsupported validation symbol: ${normalizedSymbol}`);
+    }
+
+    const snapshot = await fetchMacroEndpoint(
+      `/api/macro/validation-suite?symbol=${encodeURIComponent(normalizedSymbol)}`
+    );
+    if (!snapshot || snapshot.symbol !== normalizedSymbol || !snapshot.scorecard?.metrics) {
+      throw new Error("Validation snapshot was incomplete");
+    }
+    return snapshot;
   }
 
   const MACRO_SERVICE_LABELS = {
@@ -1138,6 +1158,7 @@
   window.TBBFXMacroMap = {
     init,
     refresh,
+    fetchValidationScorecard,
     resetView,
     focusHormuz: () => {
       const hotspot = mergeRequiredHotspots(activePayload.hotspots || []).find((item) => item.id === "strait-hormuz-required");

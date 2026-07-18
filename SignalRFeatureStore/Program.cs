@@ -49,10 +49,18 @@ if (string.IsNullOrWhiteSpace(activeSecurityKey))
 }
 var allowedOrigins = ParseAllowedOrigins(builder.Configuration["TBBFX_ALLOWED_ORIGINS"]);
 
-// Configure port to run on 5000 locally; Azure can inject PORT when hosted behind a platform proxy.
+// Production traffic must enter through the loopback-only Nginx gateway. Development
+// keeps the existing LAN binding so the MAUI companion can connect on trusted networks.
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(configuredPort);
+    if (productionMode)
+    {
+        options.Listen(IPAddress.Loopback, configuredPort);
+    }
+    else
+    {
+        options.ListenAnyIP(configuredPort);
+    }
 });
 
 // Add services to the container. MessagePack enables low-latency binary hub frames,
