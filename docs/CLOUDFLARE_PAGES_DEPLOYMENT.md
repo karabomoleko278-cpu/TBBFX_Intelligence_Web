@@ -47,7 +47,11 @@ Headers included in `terminal/_headers`:
 
 The hosted terminal can demonstrate the public interface and simulated/read-only analytics without exposing execution controls.
 
-## Secure Live Bridge For Your Own Devices
+## Development-Only Quick Bridge
+
+The quick-tunnel flow below is for temporary operator testing only. It is not a
+production backend deployment: the hostname is ephemeral, there is no dedicated
+gateway/load balancer, and it must never expose MT5 execution routes.
 
 Cloudflare Pages is public HTTPS, so browsers will not reliably let it talk straight to `http://127.0.0.1:5000` on your laptop. To view your private running terminal data from the hosted site, you can launch a secure tunnel to `SignalRFeatureStore` using our automated bridge script.
 
@@ -110,12 +114,19 @@ Optional: if you also expose `FeatureFactory` separately, add `featureBridge`:
 https://tbbfx-intelligence-web.pages.dev/?bridge=https://SIGNALR-TUNNEL.trycloudflare.com&featureBridge=https://FEATUREFACTORY-TUNNEL.trycloudflare.com
 ```
 
-Safety rules for live bridge mode:
+Safety rules for development bridge mode:
 
 - Only tunnel sanitized read-only market telemetry.
 - Do not tunnel trade execution endpoints.
 - Do not tunnel MT5 credentials, account details, or private settings.
 - Keep `TBBFX_FEATURE_UPDATE_KEY` configured before allowing browser-origin writes through any public tunnel.
+
+## Hardened Production Backend
+
+For a public read-only backend, use the named-tunnel, Nginx, per-IP limiting, and
+cache configuration documented in `docs/PRODUCTION_DEPLOYMENT.md`. The production
+launcher intentionally refuses to fall back to a quick tunnel. Cloudflare Pages
+can remain online independently while that private backend is unavailable.
 
 ## What Stays Private
 

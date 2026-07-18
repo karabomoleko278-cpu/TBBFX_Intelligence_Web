@@ -1,0 +1,10 @@
+# Public deployment template only. Copy this file to .dev.vars locally and
+# supply real values there; .dev.vars is ignored and must never be committed.
+TBBFX_PRODUCTION_MODE=1
+TBBFX_PUBLIC_READONLY=1
+# Generate this locally. Never put a real key in this committed template.
+TBBFX_FEATURE_UPDATE_KEY=
+TBBFX_PUBLIC_RATE_LIMIT_PER_MINUTE=60
+TBBFX_PROCESS_ROLE=leader
+TBBFX_RUN_STREAM_PROCESSORS=1
+TBBFX_RUN_NEWS_AGGREGATOR=1

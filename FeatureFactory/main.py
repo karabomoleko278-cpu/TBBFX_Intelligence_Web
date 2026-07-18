@@ -1,9 +1,11 @@
 import asyncio
+import copy
 import csv
 import math
 import time
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from datetime import datetime
 from core.math_greeks import fetch_local_gex_data
 from core.stream_processor import StreamProcessor
@@ -13,8 +15,44 @@ from core.state_db import get_state_db
 from core.ml_optimizer import ExecutionOptimizer
 from core.momentum import MomentumScorer, label_for
 from core.config import settings
-from core.query_params import EmptyQuery, GovernanceQuery, MarketDataQuery, OptimizationQuery
+from core.macro_intelligence import (
+    build_geopolitical_feed_live,
+    build_macro_calendar_live,
+    build_macro_geopolitical_intelligence_live,
+)
+from core.news_aggregator import get_news_aggregator
+from core.sentiment_engine import TbbFxSentimentEngine
+from core.cot_positioning import CotPositioningEngine, get_cot_positioning_engine
+from core.liquidity_engine import FedNetLiquidityEngine, get_fed_net_liquidity_engine
+from core.yield_spread_engine import YieldSpreadEngine, get_yield_spread_engine
+from core.yield_curve_engine import YieldCurveEngine, get_yield_curve_engine
+from core.regime_handshake import get_macro_regime_handshake
+from core.cache_manager import (
+    HIGH_FREQUENCY_TTL_SECONDS,
+    LOW_FREQUENCY_TTL_SECONDS,
+    OFFLINE_RETRY_TTL_SECONDS,
+    get_local_cache,
+)
+from core.fallback_router import ResilientFallbackRouter
+from core.public_series_fallback import PublicFredSeriesFallbackFetcher
+from core.public_cot_fallback import PublicCftcFallbackFetcher
+from core.query_params import (
+    EmptyQuery,
+    GeopoliticalNewsQuery,
+    GovernanceQuery,
+    MacroEconomicQuery,
+    MarketDataQuery,
+    OptimizationQuery,
+)
 from core.router_extensions import tbbfx_router_command
+from core.rate_limiter import (
+    TbbFxIpRateLimiter,
+    cache_policy_for,
+    is_public_market_path,
+    resolve_client_ip,
+    resolve_forwarded_ip,
+)
+from core.tbbfx_object import make_tbbfx_object, pack_tbbfx_object, to_transport_dict
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -43,6 +81,79 @@ app.add_middleware(
     allow_headers=["*"],
     allow_private_network=True,
 )
+
+public_rate_limiter = TbbFxIpRateLimiter(
+    permit_limit=settings.PUBLIC_RATE_LIMIT_PER_MINUTE,
+    window_seconds=60,
+)
+
+
+def _merge_vary_header(response: Response, value: str) -> None:
+    current = {item.strip() for item in response.headers.get("Vary", "").split(",") if item.strip()}
+    current.add(value)
+    response.headers["Vary"] = ", ".join(sorted(current))
+
+
+@app.middleware("http")
+async def production_gateway_guardrails(request: Request, call_next):
+    """Apply the final per-IP limit and explicit CDN cache contract."""
+    decision = None
+    if request.method not in {"HEAD", "OPTIONS"} and is_public_market_path(request.url.path):
+        client_ip = resolve_client_ip(request)
+        decision = public_rate_limiter.check(client_ip)
+        if not decision.allowed:
+            envelope = make_tbbfx_object(
+                [],
+                provider="feature_factory_security",
+                route="security.rate_limit",
+                warnings=["Public request limit exceeded. Retry after the advertised interval."],
+                extra={
+                    "status": 429,
+                    "retry_after_seconds": decision.retry_after_seconds,
+                },
+            )
+            headers = {
+                "Retry-After": str(decision.retry_after_seconds),
+                "X-RateLimit-Limit": str(decision.limit),
+                "X-RateLimit-Remaining": "0",
+                "Cache-Control": "private, no-store",
+                "CDN-Cache-Control": "no-store",
+                "Vary": "Accept, Origin",
+            }
+            if "application/x-msgpack" in request.headers.get("accept", "").lower():
+                return Response(
+                    content=pack_tbbfx_object(envelope),
+                    status_code=429,
+                    media_type="application/x-msgpack",
+                    headers=headers,
+                )
+            return JSONResponse(
+                content=to_transport_dict(envelope),
+                status_code=429,
+                headers=headers,
+            )
+
+    response = await call_next(request)
+    _merge_vary_header(response, "Accept")
+    _merge_vary_header(response, "Origin")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+
+    if decision is not None:
+        response.headers["X-RateLimit-Limit"] = str(decision.limit)
+        response.headers["X-RateLimit-Remaining"] = str(decision.remaining)
+
+    if response.status_code >= 400:
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["CDN-Cache-Control"] = "no-store"
+    else:
+        browser_policy, cdn_policy = cache_policy_for(request)
+        response.headers["Cache-Control"] = browser_policy
+        if cdn_policy:
+            response.headers["CDN-Cache-Control"] = cdn_policy
+        else:
+            response.headers["CDN-Cache-Control"] = "no-store"
+
+    return response
 
 app.include_router(governance_router)
 
@@ -75,6 +186,33 @@ manager = ConnectionManager()
 # Durable local state + options-exposure engine + ML optimizer (shared singletons)
 db = get_state_db()
 exposure_engine = OptionsExposureEngine(db=db)
+sentiment_engine = TbbFxSentimentEngine()
+cot_positioning_engine = get_cot_positioning_engine()
+liquidity_engine = get_fed_net_liquidity_engine()
+yield_spread_engine = get_yield_spread_engine()
+yield_curve_engine = get_yield_curve_engine()
+macro_regime_handshake = get_macro_regime_handshake()
+macro_cache = get_local_cache()
+macro_fallback_router = ResilientFallbackRouter()
+sentiment_refresh_lock = asyncio.Lock()
+public_series_fallback = PublicFredSeriesFallbackFetcher()
+public_cot_fallback = PublicCftcFallbackFetcher()
+secondary_cot_positioning_engine = CotPositioningEngine(
+    source_fetcher=public_cot_fallback,
+    cache_ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+)
+secondary_liquidity_engine = FedNetLiquidityEngine(
+    series_fetcher=public_series_fallback,
+    cache_ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+)
+secondary_yield_spread_engine = YieldSpreadEngine(
+    series_fetcher=public_series_fallback,
+    cache_ttl_seconds=HIGH_FREQUENCY_TTL_SECONDS,
+)
+secondary_yield_curve_engine = YieldCurveEngine(
+    series_fetcher=public_series_fallback,
+    cache_ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+)
 optimizer = ExecutionOptimizer()
 momentum_scorer = MomentumScorer()
 
@@ -104,6 +242,178 @@ if not _SOLUTION_ROOT.exists():
 def _clean_symbol(symbol: str) -> str:
     sym = symbol.upper().strip()
     return sym[:-1] if sym.endswith("M") and sym[:-1] in settings.WATCHLIST else sym
+
+
+def _macro_payload_usable(payload: Dict[str, Any]) -> bool:
+    """Reject provider-shaped error packets while accepting valid zero values."""
+    status = str(payload.get("status") or "").strip().lower()
+    if status in {"unavailable", "offline", "error", "failed"}:
+        return False
+    for key in ("positions", "spreads", "historical_weekly", "symbols", "items"):
+        value = payload.get(key)
+        if isinstance(value, (list, dict)) and bool(value):
+            return True
+    return any(
+        payload.get(key) is not None
+        for key in ("net_liquidity_millions", "calculated_slope_bps", "sentiment_score")
+    )
+
+
+def _filter_macro_payload(payload: Dict[str, Any], symbol: Optional[str]) -> Dict[str, Any]:
+    """Apply symbol filtering after one globally cached provider request."""
+    result = copy.deepcopy(payload)
+    if not symbol:
+        return result
+    normalized = _clean_symbol(symbol)
+    for key in ("positions", "spreads"):
+        values = result.get(key)
+        if isinstance(values, list):
+            result[key] = [
+                item for item in values
+                if isinstance(item, dict) and _clean_symbol(str(item.get("symbol") or "")) == normalized
+            ]
+    symbols = result.get("symbols")
+    if isinstance(symbols, list):
+        result["symbols"] = [
+            item for item in symbols
+            if isinstance(item, dict) and _clean_symbol(str(item.get("symbol") or "")) == normalized
+        ]
+    elif isinstance(symbols, dict):
+        match = next(
+            (
+                value for key, value in symbols.items()
+                if _clean_symbol(str(key)) == normalized
+            ),
+            None,
+        )
+        result["symbols"] = [] if match is None else [match]
+    result["requested_symbol"] = normalized
+    return result
+
+
+def _cached_macro_snapshot(cache_key: str) -> Optional[Dict[str, Any]]:
+    cached, metadata = macro_cache.get_with_metadata(cache_key)
+    if not isinstance(cached, dict) or metadata is None:
+        return None
+    cached["cache_status"] = "HIT"
+    cached["cache_age_seconds"] = round(float(metadata["age_seconds"]), 3)
+    cached["cache_ttl_remaining_seconds"] = round(float(metadata["ttl_remaining_seconds"]), 3)
+    return cached
+
+
+def _guarded_macro_snapshot_sync(
+    *,
+    cache_key: str,
+    ttl_seconds: int,
+    route: str,
+    primary,
+    secondary=None,
+) -> Dict[str, Any]:
+    """Serve memory, then primary/secondary/durable providers without raising."""
+    cached = _cached_macro_snapshot(cache_key)
+    if cached is not None:
+        return cached
+
+    # Recheck after acquiring the per-key lock. Only one concurrent request is
+    # allowed to call upstream providers when an entry expires.
+    with macro_cache.refresh_lock(cache_key):
+        cached = _cached_macro_snapshot(cache_key)
+        if cached is not None:
+            return cached
+
+        def durable_save(payload: Dict[str, Any]) -> None:
+            db.save_macro_fallback_state(cache_key, payload, provider=payload.get("provider"))
+
+        payload = macro_fallback_router.execute(
+            route=route,
+            primary=primary,
+            secondary=secondary,
+            validator=_macro_payload_usable,
+            durable_load=lambda: db.get_macro_fallback_state(cache_key),
+            durable_save=durable_save,
+        )
+        payload["cache_status"] = "MISS_REFRESHED"
+        ttl = (
+            OFFLINE_RETRY_TTL_SECONDS
+            if payload.get("data_status") == "SERVICE_TEMPORARILY_OFFLINE"
+            else ttl_seconds
+        )
+        macro_cache.set(cache_key, payload, ttl)
+        return payload
+
+
+async def _guarded_macro_snapshot(**kwargs) -> Dict[str, Any]:
+    return await asyncio.to_thread(_guarded_macro_snapshot_sync, **kwargs)
+
+
+async def _refresh_sentiment_snapshot(cache_key: str) -> Dict[str, Any]:
+    failures: List[str] = []
+    try:
+        news_snapshot = await get_news_aggregator().snapshot(limit=150)
+        analysis = sentiment_engine.weighted_sentiment(news_snapshot.get("items", []))
+        analysis["warnings"] = list(
+            dict.fromkeys((news_snapshot.get("warnings", []) or []) + (analysis.get("warnings", []) or []))
+        )
+        analysis["provider"] = "multi_provider_news_weighted_lexicon"
+        analysis["last_updated"] = (
+            news_snapshot.get("last_updated")
+            or news_snapshot.get("generated_at")
+            or datetime.now().astimezone().isoformat()
+        )
+        analysis["data_status"] = news_snapshot.get("data_status", "LIVE_PRIMARY")
+        analysis["status_warning"] = news_snapshot.get("status_warning")
+        if news_snapshot.get("items"):
+            analysis["status"] = "available"
+            db.save_macro_fallback_state(cache_key, analysis, provider=analysis["provider"])
+        else:
+            failures.extend(analysis["warnings"] or ["No usable news observations were returned."])
+            analysis = db.get_macro_fallback_state(cache_key) or {}
+            if analysis:
+                analysis["data_status"] = "FALLBACK_REDUNDANCY_ACTIVE"
+                analysis["status_warning"] = "FALLBACK_REDUNDANCY_ACTIVE"
+                analysis["fallback_source"] = "durable_local_state"
+                analysis["warnings"] = list(dict.fromkeys((analysis.get("warnings", []) or []) + failures))
+            else:
+                from core.fallback_router import service_offline_payload
+                analysis = service_offline_payload("api.macro.sentiment", failures)
+    except Exception as exc:  # provider boundaries must not break frontend polling
+        failures.append(f"Sentiment providers failed: {exc}")
+        analysis = db.get_macro_fallback_state(cache_key) or {}
+        if analysis:
+            analysis["data_status"] = "FALLBACK_REDUNDANCY_ACTIVE"
+            analysis["status_warning"] = "FALLBACK_REDUNDANCY_ACTIVE"
+            analysis["fallback_source"] = "durable_local_state"
+            analysis["warnings"] = list(dict.fromkeys((analysis.get("warnings", []) or []) + failures))
+        else:
+            from core.fallback_router import service_offline_payload
+            analysis = service_offline_payload("api.macro.sentiment", failures)
+
+    analysis["read_only"] = True
+    analysis["advisory_only"] = True
+    analysis["execution_mutation_allowed"] = False
+    analysis["cache_status"] = "MISS_REFRESHED"
+    ttl = (
+        OFFLINE_RETRY_TTL_SECONDS
+        if analysis.get("data_status") == "SERVICE_TEMPORARILY_OFFLINE"
+        else HIGH_FREQUENCY_TTL_SECONDS
+    )
+    macro_cache.set(cache_key, analysis, ttl)
+    return analysis
+
+
+async def _guarded_sentiment_snapshot() -> Dict[str, Any]:
+    cache_key = "macro:sentiment:watchlist"
+    cached = _cached_macro_snapshot(cache_key)
+    if cached is not None:
+        return cached
+
+    # The news aggregator is asynchronous, so use a dedicated async refresh
+    # lock and recheck memory before touching any upstream feed.
+    async with sentiment_refresh_lock:
+        cached = _cached_macro_snapshot(cache_key)
+        if cached is not None:
+            return cached
+        return await _refresh_sentiment_snapshot(cache_key)
 
 
 def _resolve_mt5_symbol(symbol: str) -> str:
@@ -230,8 +540,15 @@ def _momentum_for(symbol: str) -> Dict[str, Any]:
 @app.on_event("startup")
 async def startup_event():
     """Initializes real-time streaming tasks on startup."""
-    print("[FeatureFactory] Starting up and launching stream processors...")
-    for ticker in settings.WATCHLIST:
+    print(f"[FeatureFactory] Starting process role={settings.PROCESS_ROLE}.")
+    if settings.RUN_NEWS_AGGREGATOR:
+        await get_news_aggregator().start()
+    else:
+        print("[FeatureFactory] News aggregator disabled for this replica.")
+
+    if settings.RUN_STREAM_PROCESSORS:
+        print("[FeatureFactory] Launching leader stream processors...")
+    for ticker in settings.WATCHLIST if settings.RUN_STREAM_PROCESSORS else []:
         # Stream from the broker-suffixed symbol (e.g. 'XAUUSDm') but key/label
         # everything by the clean symbol ('XAUUSD').
         mt5_sym = ticker + settings.MT5_SYMBOL_SUFFIX if settings.MT5_SYMBOL_SUFFIX else ticker
@@ -248,7 +565,7 @@ async def startup_event():
     # Start the automated gamma-flip scanner across the watchlist — only if
     # explicitly enabled, so the free yfinance feed isn't hammered and the
     # scanner never starves foreground /api/exposure requests on startup.
-    if settings.ENABLE_STARTUP_SCANNER:
+    if settings.RUN_STREAM_PROCESSORS and settings.ENABLE_STARTUP_SCANNER:
         print("[FeatureFactory] Startup gamma-flip scanner ENABLED.")
         asyncio.create_task(exposure_engine.run_scanner_loop(settings.WATCHLIST))
     else:
@@ -280,6 +597,8 @@ async def shutdown_event():
         processor.stop()
     for ticker, task in stream_tasks.items():
         task.cancel()
+    if settings.RUN_NEWS_AGGREGATOR:
+        await get_news_aggregator().stop()
     print("[FeatureFactory] All streams shut down.")
 
 # ==========================================
@@ -291,7 +610,10 @@ def read_root():
     return {
         "status": "online",
         "service": "TBBFX Centralized Feature Factory",
-        "active_symbols": settings.WATCHLIST
+        "active_symbols": settings.WATCHLIST,
+        "process_role": settings.PROCESS_ROLE,
+        "stream_processors": settings.RUN_STREAM_PROCESSORS,
+        "news_aggregator": settings.RUN_NEWS_AGGREGATOR,
     }
 
 @app.get("/api/exposure/{symbol}")
@@ -446,12 +768,258 @@ def get_macro():
         "warnings": [] if y10 is not None else ["10Y treasury source unavailable; frontend may retain prior value."],
     }
 
+
+@app.get("/api/macro/calendar")
+@tbbfx_router_command(
+    query_model=MacroEconomicQuery,
+    provider="macro_intelligence_router",
+    route="api.macro.calendar",
+    messagepack=True,
+)
+async def get_macro_calendar(
+    request: Request,
+    symbol: Optional[str] = None,
+    importance: Optional[str] = None,
+    country: Optional[str] = None,
+    limit: int = 150,
+):
+    """Read-only macro calendar milestones for the geographic Macro Map."""
+    return await build_macro_calendar_live(
+        symbol=symbol,
+        importance=importance,
+        country=country,
+        limit=limit,
+    )
+
+
+@app.get("/api/macro/geopolitical-feed")
+@tbbfx_router_command(
+    query_model=GeopoliticalNewsQuery,
+    provider="macro_intelligence_router",
+    route="api.macro.geopolitical_feed",
+    messagepack=True,
+)
+async def get_macro_geopolitical_feed(
+    request: Request,
+    symbol: Optional[str] = None,
+    keywords: Optional[str] = None,
+    category: Optional[str] = None,
+    country: Optional[str] = None,
+    source: Optional[str] = None,
+    min_latitude: Optional[float] = None,
+    max_latitude: Optional[float] = None,
+    min_longitude: Optional[float] = None,
+    max_longitude: Optional[float] = None,
+    limit: int = 150,
+):
+    """Read-only geopolitical/event stream for the geographic Macro Map."""
+    return await build_geopolitical_feed_live(
+        symbol=symbol,
+        keywords=keywords,
+        category=category,
+        country=country,
+        source=source,
+        min_latitude=min_latitude,
+        max_latitude=max_latitude,
+        min_longitude=min_longitude,
+        max_longitude=max_longitude,
+        limit=limit,
+    )
+
+
+@app.get("/api/macro/geopolitical-intelligence/{symbol}")
+@tbbfx_router_command(
+    query_model=GeopoliticalNewsQuery,
+    provider="macro_intelligence_router",
+    route="api.macro.geopolitical_intelligence",
+    messagepack=True,
+)
+async def get_macro_geopolitical_intelligence(request: Request, symbol: str, limit: int = 150):
+    """Read-only combined macro/geopolitical map packet for one watchlist symbol."""
+    return await build_macro_geopolitical_intelligence_live(symbol=symbol, limit=limit)
+
+
+@app.get("/api/macro/geospatial-nodes")
+@tbbfx_router_command(
+    query_model=GeopoliticalNewsQuery,
+    provider="macro_intelligence_router",
+    route="api.macro.geospatial_nodes",
+    messagepack=True,
+)
+async def get_macro_geospatial_nodes(request: Request, symbol: Optional[str] = None, limit: int = 150):
+    """Read-only geospatial node packet for the 3D Macro Map globe."""
+    return await build_macro_geopolitical_intelligence_live(symbol=symbol, limit=limit)
+
+
+@app.get("/api/macro/sentiment")
+@tbbfx_router_command(
+    query_model=MacroEconomicQuery,
+    provider="macro_sentiment_router",
+    route="api.macro.sentiment",
+    messagepack=True,
+)
+async def get_macro_sentiment(
+    request: Request,
+    symbol: Optional[str] = None,
+    limit: int = 150,
+):
+    """Return read-only, severity-weighted news sentiment for the watchlist."""
+    analysis = await _guarded_sentiment_snapshot()
+    return _filter_macro_payload(analysis, symbol)
+
+
+@app.get("/api/macro/cot-positioning")
+@tbbfx_router_command(
+    query_model=MacroEconomicQuery,
+    provider="cftc_positioning_router",
+    route="api.macro.cot_positioning",
+    messagepack=True,
+)
+async def get_macro_cot_positioning(
+    request: Request,
+    symbol: Optional[str] = None,
+    limit: int = 52,
+):
+    """Return read-only CFTC positioning and 52-week percentile telemetry."""
+    packet = await _guarded_macro_snapshot(
+        cache_key="macro:cot-positioning:watchlist",
+        ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+        route="api.macro.cot_positioning",
+        primary=lambda: cot_positioning_engine.snapshot(None),
+        secondary=lambda: secondary_cot_positioning_engine.snapshot(None),
+    )
+    return _filter_macro_payload(packet, symbol)
+
+
+@app.get("/api/macro/liquidity-index")
+@tbbfx_router_command(
+    query_model=EmptyQuery,
+    provider="fred_net_liquidity",
+    route="api.macro.liquidity_index",
+    messagepack=True,
+)
+async def get_macro_liquidity_index(request: Request):
+    """Return read-only USD net-liquidity context for the macro workspace."""
+    return await _guarded_macro_snapshot(
+        cache_key="macro:liquidity-index",
+        ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+        route="api.macro.liquidity_index",
+        primary=liquidity_engine.snapshot,
+        secondary=secondary_liquidity_engine.snapshot,
+    )
+
+
+@app.get("/api/macro/yield-spreads")
+@tbbfx_router_command(
+    query_model=MacroEconomicQuery,
+    provider="fred_yield_spreads",
+    route="api.macro.yield_spreads",
+    messagepack=True,
+)
+async def get_macro_yield_spreads(
+    request: Request,
+    symbol: Optional[str] = None,
+    limit: int = 150,
+):
+    """Return read-only sovereign 10-year spread context for supported FX pairs."""
+    packet = await _guarded_macro_snapshot(
+        cache_key="macro:yield-spreads:watchlist",
+        ttl_seconds=HIGH_FREQUENCY_TTL_SECONDS,
+        route="api.macro.yield_spreads",
+        primary=lambda: yield_spread_engine.snapshot(None),
+        secondary=lambda: secondary_yield_spread_engine.snapshot(None),
+    )
+    return _filter_macro_payload(packet, symbol)
+
+
+@app.get("/api/macro/yield-curve")
+@tbbfx_router_command(
+    query_model=EmptyQuery,
+    provider="fred_yield_curve",
+    route="api.macro.yield_curve",
+    messagepack=True,
+)
+async def get_macro_yield_curve(request: Request):
+    """Return the read-only US 10Y-2Y curve and inversion advisory."""
+    return await _guarded_macro_snapshot(
+        cache_key="macro:yield-curve",
+        ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+        route="api.macro.yield_curve",
+        primary=yield_curve_engine.snapshot,
+        secondary=secondary_yield_curve_engine.snapshot,
+    )
+
+
+@app.get("/api/macro/regime-state")
+@tbbfx_router_command(
+    query_model=EmptyQuery,
+    provider="tbbfx_read_only_macro_handshake",
+    route="api.macro.regime_state",
+    messagepack=True,
+)
+async def get_macro_regime_state(request: Request):
+    """Synthesize mixed-frequency macro context without mutating execution state."""
+    news_snapshot = await get_news_aggregator().snapshot(limit=150)
+    sentiment, cot_positioning, liquidity, yield_curve, yield_spreads = await asyncio.gather(
+        _guarded_sentiment_snapshot(),
+        _guarded_macro_snapshot(
+            cache_key="macro:cot-positioning:watchlist",
+            ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+            route="api.macro.cot_positioning",
+            primary=lambda: cot_positioning_engine.snapshot(None),
+            secondary=lambda: secondary_cot_positioning_engine.snapshot(None),
+        ),
+        _guarded_macro_snapshot(
+            cache_key="macro:liquidity-index",
+            ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+            route="api.macro.liquidity_index",
+            primary=liquidity_engine.snapshot,
+            secondary=secondary_liquidity_engine.snapshot,
+        ),
+        _guarded_macro_snapshot(
+            cache_key="macro:yield-curve",
+            ttl_seconds=LOW_FREQUENCY_TTL_SECONDS,
+            route="api.macro.yield_curve",
+            primary=yield_curve_engine.snapshot,
+            secondary=secondary_yield_curve_engine.snapshot,
+        ),
+        _guarded_macro_snapshot(
+            cache_key="macro:yield-spreads:watchlist",
+            ttl_seconds=HIGH_FREQUENCY_TTL_SECONDS,
+            route="api.macro.yield_spreads",
+            primary=lambda: yield_spread_engine.snapshot(None),
+            secondary=lambda: secondary_yield_spread_engine.snapshot(None),
+        ),
+    )
+    sentiment.setdefault("source_frequency", "NEWS_INTRADAY")
+    sentiment.setdefault("refresh_cadence_seconds", 60)
+    regime = macro_regime_handshake.evaluate(
+        sentiment=sentiment,
+        cot_positioning=cot_positioning,
+        liquidity=liquidity,
+        yield_curve=yield_curve,
+        yield_spreads=yield_spreads,
+        news_items=news_snapshot.get("items", []),
+    )
+    component_warnings = []
+    for packet in (news_snapshot, sentiment, cot_positioning, liquidity, yield_curve, yield_spreads):
+        component_warnings.extend(packet.get("warnings", []) or [])
+    regime["warnings"] = list(dict.fromkeys((regime.get("warnings", []) or []) + component_warnings))
+    return regime
+
+
 # ==========================================
 # WEBSOCKET STREAMING GATEWAY
 # ==========================================
 
 @app.websocket("/ws/features")
 async def websocket_endpoint(websocket: WebSocket):
+    direct = websocket.client.host if websocket.client else "unknown"
+    client_ip = resolve_forwarded_ip(direct, websocket.headers)
+    decision = public_rate_limiter.check(f"websocket:{client_ip}")
+    if not decision.allowed:
+        await websocket.close(code=1008, reason="Public connection rate limit exceeded.")
+        return
     await manager.connect(websocket)
     try:
         while True:

@@ -82,8 +82,8 @@ async def main() -> int:
 
     tools = g.governance_tool_definitions()
     print(f"OpenBB tool definitions={len(tools)}")
-    if len(tools) != 8:
-        failures.append("expected Decide/Transform plus six read-only MCP tool definitions")
+    if len(tools) != 9:
+        failures.append("expected Decide/Transform plus seven read-only MCP tool definitions")
 
     assessment = await g.execute_agent_assessment("XAUUSD")
     print(

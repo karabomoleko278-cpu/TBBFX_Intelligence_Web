@@ -4,8 +4,10 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MessagePack;
+using MessagePack.Resolvers;
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
@@ -23,10 +25,17 @@ var configuredPort = int.TryParse(Environment.GetEnvironmentVariable("PORT"), ou
     ? azurePort
     : 5000;
 var publicReadOnly = IsTruthy(builder.Configuration["TBBFX_PUBLIC_READONLY"]);
+var productionMode = IsTruthy(builder.Configuration["TBBFX_PRODUCTION_MODE"]);
 var featureUpdateKey = builder.Configuration["TBBFX_FEATURE_UPDATE_KEY"];
 var activeSecurityKey = featureUpdateKey;
 if (string.IsNullOrWhiteSpace(activeSecurityKey))
 {
+    if (productionMode)
+    {
+        throw new InvalidOperationException(
+            "TBBFX_FEATURE_UPDATE_KEY is required when TBBFX_PRODUCTION_MODE is enabled.");
+    }
+
     activeSecurityKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
     Console.WriteLine("");
     Console.WriteLine("==========================================================================================");
@@ -72,22 +81,57 @@ builder.Services.AddCors(options =>
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddFixedWindowLimiter("public-read", limiter =>
+    options.AddPolicy("public-read", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: ResolveClientAddress(context),
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                AutoReplenishment = true
+            }));
+    options.AddPolicy("private-write", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: ResolveClientAddress(context),
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                // FeatureFactory publishes bursty multi-symbol telemetry. Authentication remains
+                // mandatory for remote writes, while this partition prevents one source starving others.
+                PermitLimit = 600,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 60,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                AutoReplenishment = true
+            }));
+    options.OnRejected = async (context, cancellationToken) =>
     {
-        limiter.PermitLimit = 120;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
-        limiter.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-    });
-    options.AddFixedWindowLimiter("private-write", limiter =>
-    {
-        // FeatureFactory publishes bursty multi-symbol telemetry. Keep this private/CORS scoped,
-        // but allow enough headroom that live cache updates are not starved by 429s.
-        limiter.PermitLimit = 600;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 60;
-        limiter.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-    });
+        var http = context.HttpContext;
+        var envelope = ToTbbFxObject(
+            Array.Empty<object>(),
+            "signalr_feature_store_security",
+            "security.rate_limit",
+            "Public request limit exceeded. Retry after 60 seconds.");
+
+        http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        http.Response.Headers.RetryAfter = "60";
+        http.Response.Headers.CacheControl = "private, no-store";
+        http.Response.Headers["CDN-Cache-Control"] = "no-store";
+        http.Response.Headers["X-RateLimit-Limit"] = "60";
+        http.Response.Headers["X-RateLimit-Remaining"] = "0";
+
+        if (http.Request.GetTypedHeaders().Accept?.Any(media =>
+                media.MediaType.Value?.Equals("application/x-msgpack", StringComparison.OrdinalIgnoreCase) == true) == true)
+        {
+            var body = MessagePackSerializer.Serialize(envelope, ContractlessStandardResolver.Options);
+            http.Response.ContentType = "application/x-msgpack";
+            await http.Response.Body.WriteAsync(body.AsMemory(), cancellationToken);
+            return;
+        }
+
+        await http.Response.WriteAsJsonAsync(envelope, cancellationToken);
+    };
 });
 
 var app = builder.Build();
@@ -278,6 +322,50 @@ static bool IsAuthorized(HttpContext context, string activeKey, string? expected
     }
 
     return false;
+}
+
+static string ResolveClientAddress(HttpContext context)
+{
+    var direct = context.Connection.RemoteIpAddress;
+    if (IsTrustedProxyAddress(direct))
+    {
+        var forwarded = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault()
+                        ?? context.Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0].Trim();
+        if (IPAddress.TryParse(forwarded, out var parsedForwarded))
+        {
+            return parsedForwarded.ToString();
+        }
+    }
+
+    return direct?.ToString() ?? "unknown";
+}
+
+static bool IsTrustedProxyAddress(IPAddress? address)
+{
+    if (address is null)
+    {
+        return false;
+    }
+
+    if (address.IsIPv4MappedToIPv6)
+    {
+        address = address.MapToIPv4();
+    }
+
+    if (IPAddress.IsLoopback(address))
+    {
+        return true;
+    }
+
+    var bytes = address.GetAddressBytes();
+    if (address.AddressFamily == AddressFamily.InterNetwork)
+    {
+        return bytes[0] == 10 ||
+               (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
+               (bytes[0] == 192 && bytes[1] == 168);
+    }
+
+    return address.IsIPv6LinkLocal || address.IsIPv6SiteLocal;
 }
 
 static bool LooksLikeTbbFxObject(JsonElement payload)
@@ -856,8 +944,8 @@ app.MapGet("/features/all", (HttpContext http) =>
 }).RequireRateLimiting("private-write");
 
 // Map the SignalR hubs.
-app.MapHub<FeatureHub>("/features/stream");        // original
-app.MapHub<MarketPulseHub>("/hub/marketpulse");     // live Volume Delta + OBI (web + MAUI)
+app.MapHub<FeatureHub>("/features/stream").RequireRateLimiting("public-read");
+app.MapHub<MarketPulseHub>("/hub/marketpulse").RequireRateLimiting("public-read");
 
 // Endpoint to run the 4 quantitative validation pillars on a background thread and stream progress via SignalR
 app.MapPost("/api/validation/run/{symbol}", (

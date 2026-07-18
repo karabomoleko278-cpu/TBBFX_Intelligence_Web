@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.config import settings
+from core.macro_intelligence import build_macro_geopolitical_intelligence
 from core.openbb_quant import calculate_quant_feature_pack
 from core.portfolio_risk_engine import PortfolioRiskEngine
 from core.state_db import get_state_db
@@ -393,6 +394,22 @@ def fetch_macroeconomic_calendar(symbol: str) -> Dict[str, Any]:
     return payload
 
 
+def fetch_macro_geopolitical_intelligence(symbol: str, limit: int = 40) -> Dict[str, Any]:
+    """Return read-only geographic macro/geopolitical intelligence for the Macro Map."""
+    sym = _clean_symbol(symbol)
+    safe_limit = max(1, min(int(limit or 40), 250))
+    payload = build_macro_geopolitical_intelligence(symbol=sym, limit=safe_limit)
+    payload["tool"] = "fetch_macro_geopolitical_intelligence"
+    payload["strategy_boundaries"] = STRATEGY_BOUNDARIES
+    payload["read_only"] = True
+    return make_tbbfx_object(
+        payload,
+        provider="macro_intelligence_router",
+        route="mcp.fetch_macro_geopolitical_intelligence",
+        warnings=list(payload.get("warnings") or []),
+    ).to_dict()
+
+
 def fetch_quantitative_feature_pack(symbol: str, timeframe: str = "M5", count: int = 240) -> Dict[str, Any]:
     """Return OpenBB-style quantitative features for recent candles."""
     sym = _clean_symbol(symbol)
@@ -524,6 +541,27 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "fetch_macro_geopolitical_intelligence",
+            "description": (
+                "Read-only geographic macro/geopolitical intelligence packet for the Macro Map, "
+                "including hotspots, symbol impact, event feed, and map telemetry points."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Watchlist instrument symbol, e.g. XAUUSD or US30."},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum calendar/feed records to return.",
+                        "default": 40,
+                        "minimum": 1,
+                        "maximum": 250,
+                    },
+                },
+                "required": ["symbol"],
+            },
+        },
+        {
             "name": "fetch_quantitative_feature_pack",
             "description": (
                 "Read-only OpenBB-style quantitative/technical feature pack "
@@ -595,6 +633,7 @@ _TOOL_HANDLERS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "fetch_historical_gex_matrix": fetch_historical_gex_matrix,
     "fetch_live_orderflow_telemetry": fetch_live_orderflow_telemetry,
     "fetch_macroeconomic_calendar": fetch_macroeconomic_calendar,
+    "fetch_macro_geopolitical_intelligence": fetch_macro_geopolitical_intelligence,
     "fetch_quantitative_feature_pack": fetch_quantitative_feature_pack,
     "fetch_portfolio_var_matrix": fetch_portfolio_var_matrix,
     "verify_governance_audit_integrity": verify_governance_audit_integrity,

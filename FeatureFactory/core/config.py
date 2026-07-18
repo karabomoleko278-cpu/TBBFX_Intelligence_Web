@@ -53,6 +53,23 @@ class Settings:
         )
         self.RISK_MAX_ORDER_SIZE: int = int(os.getenv("RISK_MAX_ORDER_SIZE", "1000"))
         self.TBBFX_FEATURE_UPDATE_KEY: str = os.getenv("TBBFX_FEATURE_UPDATE_KEY", "")
+        self.PROCESS_ROLE: str = os.getenv("TBBFX_PROCESS_ROLE", "leader").strip().lower()
+        if self.PROCESS_ROLE not in {"leader", "macro-replica", "api-replica"}:
+            raise ValueError(
+                "TBBFX_PROCESS_ROLE must be leader, macro-replica, or api-replica."
+            )
+        self.RUN_STREAM_PROCESSORS: bool = os.getenv(
+            "TBBFX_RUN_STREAM_PROCESSORS",
+            "1" if self.PROCESS_ROLE == "leader" else "0",
+        ) == "1"
+        self.RUN_NEWS_AGGREGATOR: bool = os.getenv(
+            "TBBFX_RUN_NEWS_AGGREGATOR",
+            "0" if self.PROCESS_ROLE == "api-replica" else "1",
+        ) == "1"
+        # Application-level ceiling. Cloudflare/Nginx apply the same public limit.
+        self.PUBLIC_RATE_LIMIT_PER_MINUTE: int = min(
+            60, max(1, int(os.getenv("TBBFX_PUBLIC_RATE_LIMIT_PER_MINUTE", "60")))
+        )
 
         # Free, keyless data only by default. These remain "DEMO_KEY" so no paid
         # provider is ever contacted unless the operator explicitly supplies a key.

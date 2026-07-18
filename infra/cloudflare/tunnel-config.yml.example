@@ -1,0 +1,14 @@
+# Named Cloudflare Tunnel production template. Never commit the credentials JSON.
+# Create the tunnel in your personal Cloudflare account, then copy this file to
+# C:\Users\YOUR_USER\.cloudflared\config.yml and replace both placeholders.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: C:\Users\YOUR_USER\.cloudflared\REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: api.your-tbbfx-domain.example
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 10s
+      noHappyEyeballs: false
+      httpHostHeader: api.your-tbbfx-domain.example
+  - service: http_status:404

@@ -114,6 +114,13 @@ class StateDatabase:
                 );
                 CREATE INDEX IF NOT EXISTS ix_governance_audit_symbol_ts
                     ON governance_audit_trail (symbol, timestamp DESC);
+
+                CREATE TABLE IF NOT EXISTS macro_fallback_states (
+                    cache_key    TEXT PRIMARY KEY,
+                    provider     TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at   TEXT NOT NULL
+                );
                 """
             )
             self._conn.commit()
@@ -484,6 +491,53 @@ class StateDatabase:
             "invalid_count": invalid,
             "invalid_records": invalid_records,
         }
+
+    # ------------------------------------------------------------------
+    # Durable read-only macro fallback states
+    # ------------------------------------------------------------------
+    def save_macro_fallback_state(
+        self,
+        cache_key: str,
+        payload: Dict[str, Any],
+        provider: Optional[str] = None,
+        updated_at: Optional[str] = None,
+    ) -> None:
+        """Persist the last usable analytical payload for outage recovery."""
+        timestamp = updated_at or datetime.now(timezone.utc).isoformat()
+        source = provider or str(payload.get("provider") or "unknown")
+        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO macro_fallback_states
+                   (cache_key, provider, payload_json, updated_at)
+                   VALUES (?,?,?,?)
+                   ON CONFLICT(cache_key) DO UPDATE SET
+                       provider=excluded.provider,
+                       payload_json=excluded.payload_json,
+                       updated_at=excluded.updated_at""",
+                (str(cache_key), source, payload_json, timestamp),
+            )
+            self._conn.commit()
+
+    def get_macro_fallback_state(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT provider, payload_json, updated_at
+                   FROM macro_fallback_states WHERE cache_key=?""",
+                (str(cache_key),),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        payload.setdefault("provider", row["provider"])
+        payload.setdefault("last_updated", row["updated_at"])
+        payload["durable_snapshot_updated_at"] = row["updated_at"]
+        return payload
 
     # ------------------------------------------------------------------
     def close(self) -> None:

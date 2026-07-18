@@ -7,7 +7,7 @@ import time
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, Type
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request, Response
 from pydantic import BaseModel, ValidationError
 
 from core.query_params import QueryParams
@@ -45,6 +45,39 @@ def _validation_detail(exc: ValidationError) -> list:
             item["ctx"] = {key: str(value) for key, value in item["ctx"].items()}
         safe_errors.append(item)
     return safe_errors
+
+
+def _extract_request(args: tuple, kwargs: Dict[str, Any]) -> Optional[Request]:
+    """Find the active FastAPI request without forcing every route to use one name."""
+    for value in list(args) + list(kwargs.values()):
+        if isinstance(value, Request):
+            return value
+    return None
+
+
+def _client_wants_msgpack(request: Optional[Request]) -> bool:
+    """Return MessagePack only when the caller explicitly asks for it.
+
+    Browser routes and Cloudflare Pages keep their JSON-compatible fallback,
+    while internal validation clients can request the binary transport.
+    """
+    if request is None:
+        return False
+    accept = str(request.headers.get("accept", "")).lower()
+    fmt = str(request.query_params.get("_format") or request.query_params.get("format") or "").lower()
+    return "application/x-msgpack" in accept or fmt in {"msgpack", "messagepack", "x-msgpack"}
+
+
+def _transport_result(
+    envelope: Dict[str, Any],
+    *,
+    messagepack: bool,
+    args: tuple,
+    kwargs: Dict[str, Any],
+) -> Any:
+    if messagepack and _client_wants_msgpack(_extract_request(args, kwargs)):
+        return Response(content=pack_tbbfx_object(envelope), media_type="application/x-msgpack")
+    return envelope
 
 
 def _audit_invocation(
@@ -156,7 +189,7 @@ def tbbfx_router_command(
                 start_ns=start_ns,
                 query=query,
             )
-            return pack_tbbfx_object(envelope) if messagepack else envelope
+            return _transport_result(envelope, messagepack=messagepack, args=args, kwargs=kwargs)
 
         @wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -191,7 +224,7 @@ def tbbfx_router_command(
                 start_ns=start_ns,
                 query=query,
             )
-            return pack_tbbfx_object(envelope) if messagepack else envelope
+            return _transport_result(envelope, messagepack=messagepack, args=args, kwargs=kwargs)
 
         return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
 

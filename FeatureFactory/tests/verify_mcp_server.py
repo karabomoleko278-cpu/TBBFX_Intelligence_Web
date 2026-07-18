@@ -40,6 +40,7 @@ def main() -> int:
     expected = {
         "fetch_historical_gex_matrix",
         "fetch_live_orderflow_telemetry",
+        "fetch_macro_geopolitical_intelligence",
         "fetch_macroeconomic_calendar",
         "fetch_quantitative_feature_pack",
         "fetch_portfolio_var_matrix",

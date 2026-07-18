@@ -650,6 +650,11 @@
       border: 1px solid rgba(40, 255, 156, 0.16);
       padding: 4px;
       border-radius: 6px;
+      pointer-events: none;
+    }
+
+    .time-buttons-overlay * {
+      pointer-events: auto;
     }
 
     .time-button {
@@ -689,7 +694,7 @@
     }
 
     .chart-shell::after {
-      content: "DRAG CHART TO PAN  -  RIGHT Y-AXIS / BOTTOM X-AXIS: DRAG/WHEEL  -  DOUBLE CLICK TO FIT";
+      content: "LEFT-DRAG: PAN TIME + PRICE DIAGONALLY  -  RIGHT Y-AXIS / BOTTOM X-AXIS: DRAG/WHEEL  -  DOUBLE CLICK TO FIT";
       position: absolute;
       right: 20px;
       bottom: 78px;
@@ -721,6 +726,12 @@
       inset: 0 0 72px 0;
       z-index: 1;
       background: #030604;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .chart-shell.is-free-panning #tv-chart {
+      cursor: grabbing;
     }
 
     #footprint-canvas {
@@ -813,6 +824,7 @@
       font-weight: 900;
       font-size: 12px;
       box-shadow: 0 0 20px rgba(40, 255, 156, 0.18);
+      pointer-events: none;
     }
 
     .delta-strip {
@@ -824,6 +836,7 @@
       z-index: 3;
       border-top: 1px solid rgba(216, 238, 224, 0.08);
       background: linear-gradient(180deg, rgba(3, 6, 4, 0.08), rgba(3, 6, 4, 0.85));
+      pointer-events: none;
     }
 
     #delta-canvas {
@@ -844,6 +857,7 @@
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.12em;
+      pointer-events: none;
     }
 
     .chart-status .dot,
@@ -1249,7 +1263,7 @@
                 <button class="time-button" type="button" data-tf="W1">1W</button>
               </div>
 
-              <div id="tv-chart" aria-label="TradingView Lightweight Charts execution canvas"></div>
+              <div id="tv-chart" aria-label="TradingView Lightweight Charts execution canvas. Drag to pan horizontally, vertically, or diagonally."></div>
               <canvas id="footprint-canvas"></canvas>
               <div id="y-axis-hotzone" class="axis-hotzone" title="Drag or wheel to scale the price axis. Hold Shift while dragging to pan the price range. Double-click to reset."></div>
               <div id="x-axis-hotzone" class="x-axis-hotzone" title="Drag or wheel to scale the time axis. Hold Shift while dragging to pan through history. Double-click to reset."></div>

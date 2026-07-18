@@ -32,6 +32,7 @@
     manualY: null,
     axisDrag: null,
     xAxisDrag: null,
+    chartDrag: null,
     hasLiveAnchor: false,
     renderFrame: null,
     price: profiles.GBPUSD.price,
@@ -296,7 +297,9 @@
     state.timeframe = next;
     state.userScaled = false;
     state.manualY = null;
+    state.chartDrag = null;
     state.hasLiveAnchor = false;
+    if (el["chart-shell"]) el["chart-shell"].classList.remove("is-free-panning");
     document.querySelectorAll(".time-button").forEach(function (b) { b.classList.toggle("active", normalizeTf(b.getAttribute("data-tf") || b.textContent) === next); });
     loadCandles(state.symbol);
     updatePanels();
@@ -309,6 +312,7 @@
       setBadge("degraded", "LIVE_SIGNAL: CANVAS MODE - CHART LIBRARY OFFLINE");
       return;
     }
+    var normalPriceMode = LightweightCharts.PriceScaleMode ? LightweightCharts.PriceScaleMode.Normal : 0;
     state.chart = LightweightCharts.createChart(el["tv-chart"], {
       autoSize: true,
       layout: { background: { type: "solid", color: "#030604" }, textColor: "rgba(216,238,224,.72)", fontFamily: "JetBrains Mono, monospace" },
@@ -316,8 +320,22 @@
       crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
       handleScale: { axisPressedMouseMove: { time: true, price: true }, mouseWheel: true, pinch: true },
-      rightPriceScale: { borderColor: "rgba(40,255,156,.18)", scaleMargins: { top: 0.12, bottom: 0.18 } },
+      rightPriceScale: { autoScale: false, mode: normalPriceMode, borderColor: "rgba(40,255,156,.18)", scaleMargins: { top: 0.12, bottom: 0.18 } },
       timeScale: { borderColor: "rgba(40,255,156,.14)", timeVisible: true, secondsVisible: false, rightOffset: 14, barSpacing: 20, minBarSpacing: 2, fixLeftEdge: false, fixRightEdge: false, lockVisibleTimeRangeOnResize: false }
+    });
+    state.chart.applyOptions({
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      handleScale: {
+        axisPressedMouseMove: { time: true, price: true },
+        mouseWheel: true,
+        pinch: true,
+      },
+      rightPriceScale: { autoScale: false, mode: normalPriceMode }
     });
     state.series = state.chart.addCandlestickSeries({
       upColor: "rgba(40,255,156,.58)",
@@ -346,25 +364,35 @@
     target.addEventListener("pointerdown", function () { state.userScaled = true; }, { passive: true });
     target.addEventListener("dblclick", function () { resetYAxis(); });
 
+    var chartTarget = el["tv-chart"];
+    if (chartTarget) {
+      chartTarget.addEventListener("pointerdown", startChartPan, { passive: true });
+      window.addEventListener("pointermove", moveChartPan, { passive: true });
+      window.addEventListener("pointerup", stopChartPan, { passive: true });
+      window.addEventListener("pointercancel", stopChartPan, { passive: true });
+    }
+
     var axis = el["y-axis-hotzone"];
-    if (!axis) return;
-    axis.addEventListener("pointerdown", startYAxisDrag);
-    axis.addEventListener("pointermove", moveYAxisDrag);
-    axis.addEventListener("pointerup", stopYAxisDrag);
-    axis.addEventListener("pointercancel", stopYAxisDrag);
-    axis.addEventListener("mouseleave", stopYAxisDrag);
-    axis.addEventListener("wheel", wheelYAxis, { passive: false });
-    axis.addEventListener("dblclick", function (e) { e.preventDefault(); resetYAxis(); });
+    if (axis) {
+      axis.addEventListener("pointerdown", startYAxisDrag);
+      axis.addEventListener("pointermove", moveYAxisDrag);
+      axis.addEventListener("pointerup", stopYAxisDrag);
+      axis.addEventListener("pointercancel", stopYAxisDrag);
+      axis.addEventListener("mouseleave", stopYAxisDrag);
+      axis.addEventListener("wheel", wheelYAxis, { passive: false });
+      axis.addEventListener("dblclick", function (e) { e.preventDefault(); resetYAxis(); });
+    }
 
     var xAxis = el["x-axis-hotzone"];
-    if (!xAxis) return;
-    xAxis.addEventListener("pointerdown", startXAxisDrag);
-    xAxis.addEventListener("pointermove", moveXAxisDrag);
-    xAxis.addEventListener("pointerup", stopXAxisDrag);
-    xAxis.addEventListener("pointercancel", stopXAxisDrag);
-    xAxis.addEventListener("mouseleave", stopXAxisDrag);
-    xAxis.addEventListener("wheel", wheelXAxis, { passive: false });
-    xAxis.addEventListener("dblclick", function (e) { e.preventDefault(); resetXAxis(); });
+    if (xAxis) {
+      xAxis.addEventListener("pointerdown", startXAxisDrag);
+      xAxis.addEventListener("pointermove", moveXAxisDrag);
+      xAxis.addEventListener("pointerup", stopXAxisDrag);
+      xAxis.addEventListener("pointercancel", stopXAxisDrag);
+      xAxis.addEventListener("mouseleave", stopXAxisDrag);
+      xAxis.addEventListener("wheel", wheelXAxis, { passive: false });
+      xAxis.addEventListener("dblclick", function (e) { e.preventDefault(); resetXAxis(); });
+    }
   }
 
   function seed(sym) {
@@ -587,7 +615,17 @@
 
   function route(sym) {
     sym = String(sym || "GBPUSD").toUpperCase(); if (symbols.indexOf(sym) < 0) return;
-    var old = state.symbol; state.symbol = sym; state.lastCvd = null; state.lastFeature = null; state.manualY = null; state.hasLiveAnchor = false; clearLines(); loadCandles(sym);
+    var old = state.symbol;
+    state.symbol = sym;
+    state.lastCvd = null;
+    state.lastFeature = null;
+    state.manualY = null;
+    state.userScaled = false;
+    state.chartDrag = null;
+    state.hasLiveAnchor = false;
+    if (el["chart-shell"]) el["chart-shell"].classList.remove("is-free-panning");
+    clearLines();
+    loadCandles(sym);
     document.querySelectorAll(".asset-tab").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-symbol") === sym); });
     if (old !== sym) { leave(old); join(sym); }
     updatePanels(); render(); loadLatest(sym);
@@ -618,7 +656,7 @@
   function rebaseToLiveAnchor(price, sym) {
     p(sym).price = price;
     state.price = price;
-    state.manualY = null;
+    if (!state.userScaled) state.manualY = null;
     state.levels = state.levels.filter(function (l) { return sanePrice(l.price, sym); });
     state.hasLiveAnchor = true;
     if (!state.bars.length) loadCandles(sym);
@@ -837,6 +875,39 @@
     renderSoon();
   }
 
+  function startChartPan(e) {
+    if (e.button !== 0 || state.axisDrag || state.xAxisDrag || !el["tv-chart"]) return;
+    var bounds = el["tv-chart"].getBoundingClientRect();
+    if (e.clientX >= bounds.right - 86 || e.clientY >= bounds.bottom - 38) return;
+    var range = priceRange(Math.max(240, bounds.width));
+    state.userScaled = true;
+    state.chartDrag = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      min: range.min,
+      max: range.max,
+      height: Math.max(180, bounds.height)
+    };
+    if (el["chart-shell"]) el["chart-shell"].classList.add("is-free-panning");
+  }
+
+  function moveChartPan(e) {
+    var drag = state.chartDrag;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    var span = Math.max(drag.max - drag.min, p(state.symbol).step * 20);
+    var priceOffset = (e.clientY - drag.startY) / drag.height * span;
+    state.manualY = { min: drag.min + priceOffset, max: drag.max + priceOffset };
+    renderSoon();
+  }
+
+  function stopChartPan(e) {
+    var drag = state.chartDrag;
+    if (!drag || (e && e.pointerId !== undefined && e.pointerId !== drag.pointerId)) return;
+    state.chartDrag = null;
+    if (el["chart-shell"]) el["chart-shell"].classList.remove("is-free-panning");
+    renderSoon();
+  }
+
   function startXAxisDrag(e) {
     if (!el["x-axis-hotzone"]) return;
     e.preventDefault();
@@ -881,6 +952,8 @@
 
   function resetXAxis() {
     state.userScaled = false;
+    state.chartDrag = null;
+    if (el["chart-shell"]) el["chart-shell"].classList.remove("is-free-panning");
     if (state.chart && state.chart.timeScale) state.chart.timeScale().fitContent();
     renderSoon();
   }
@@ -931,13 +1004,27 @@
   function resetYAxis() {
     state.userScaled = false;
     state.manualY = null;
+    state.chartDrag = null;
+    if (el["chart-shell"]) el["chart-shell"].classList.remove("is-free-panning");
     fitChart();
   }
 
   function render() { renderFootprint(); renderDelta(); }
+  var renderPending = false;
+  var renderingLock = false;
   function renderSoon() {
-    if (state.renderFrame) cancelAnimationFrame(state.renderFrame);
-    state.renderFrame = requestAnimationFrame(function () { state.renderFrame = null; render(); });
+    if (renderPending) return;
+    renderPending = true;
+    requestAnimationFrame(function () {
+      renderPending = false;
+      if (renderingLock) return;
+      renderingLock = true;
+      try {
+        render();
+      } finally {
+        renderingLock = false;
+      }
+    });
   }
 
   function renderFootprint() {
